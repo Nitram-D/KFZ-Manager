@@ -1,0 +1,1491 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="KFZ-Manager">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<meta name="theme-color" content="#1a1714">
+<title>KFZ-Manager</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.mjs" type="module"></script>
+<script type="module">
+  import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.mjs";
+  pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs";
+  window.pdfjsLib=pdfjsLib;
+</script>
+<style>
+  /* ============ DESIGN TOKENS ============
+     Cool, technical take: graphite charcoal + brushed-silver ink and a
+     muted sage/green signal (instrument metal, not brass). Reminder
+     status colors (amber/red) kept, since they carry their own meaning.
+     NOTE: the --amber* tokens now hold the silver/green accent values
+     (kept the names to avoid touching every reference).               */
+  :root{
+    --bg:#15171a;           /* cool near-black             */
+    --bg-2:#1c1f23;         /* raised surface              */
+    --card:#20242a;         /* card base                   */
+    --card-hi:#272c33;      /* card hover / raised         */
+    --well:#14171a;         /* input wells                 */
+    --line:#333a42;         /* cool hairline               */
+    --line-hi:#454e57;
+    --ink:#eef2f5;          /* cool white                  */
+    --ink-2:#c2cad2;        /* secondary                   */
+    --ink-3:#8b949e;        /* tertiary / labels           */
+    --ink-4:#68717a;
+    --amber:#8fb8a8;        /* primary accent — sage/silver-green */
+    --amber-soft:#9aa7ad;   /* brushed silver                     */
+    --amber-bg:rgba(143,184,168,.14);
+    --ok:#6cc38a;           /* healthy / active — green    */
+    --ok-bg:rgba(108,195,138,.15);
+    --warn:#dcb04a;         /* due soon                    */
+    --warn-bg:rgba(220,176,74,.14);
+    --danger:#e2685a;       /* overdue                     */
+    --danger-bg:rgba(226,104,90,.14);
+    --radius:18px;
+    --radius-sm:12px;
+    --shadow:0 12px 40px rgba(0,0,0,.55);
+    --shadow-card:0 2px 14px rgba(0,0,0,.35);
+    --serif:'Georgia','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,system-ui,sans-serif;
+    --mono:ui-monospace,'SF Mono','JetBrains Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    background:
+      radial-gradient(900px 500px at 80% -5%, #2a231b 0%, transparent 60%),
+      radial-gradient(700px 500px at 0% 100%, #201a14 0%, transparent 55%),
+      var(--bg);
+    color:var(--ink);font-family:var(--sans);line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+    font-feature-settings:"tnum" 1;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .app{max-width:1080px;margin:0 auto;padding:20px 16px 120px}
+
+  /* ---------- masthead ---------- */
+  .mast{display:flex;align-items:center;gap:12px;padding:8px 4px 20px}
+  .mast .brand{display:flex;flex-direction:column;line-height:1}
+  .mast .brand b{font-family:var(--serif);font-size:23px;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+  .mast .brand b em{color:var(--amber);font-style:normal}
+  .mast .brand span{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-4);margin-top:5px}
+  .mast .spacer{flex:1}
+  .mast .count{font-size:12px;color:var(--ink-3);font-family:var(--mono);
+               background:var(--bg-2);border:1px solid var(--line);padding:6px 11px;border-radius:20px}
+
+  /* ---------- fleet ---------- */
+  .fleet{display:grid;grid-template-columns:1fr;gap:14px}
+  @media(min-width:640px){.fleet{grid-template-columns:1fr 1fr}}
+  @media(min-width:960px){.fleet{grid-template-columns:1fr 1fr 1fr}}
+
+  .card{
+    position:relative;background:var(--card-hi);
+    border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+    cursor:pointer;box-shadow:var(--shadow-card);
+    transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease;
+  }
+  .card:hover{transform:translateY(-3px);border-color:var(--line-hi);box-shadow:var(--shadow)}
+  .card:active{transform:translateY(-1px)}
+  .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;z-index:2;
+                background:linear-gradient(var(--amber),var(--amber-soft))}
+
+  /* colored header block sets alias + type apart */
+  .card-head{display:flex;align-items:flex-start;gap:10px;padding:15px 17px 13px;
+             background:linear-gradient(160deg,#2c333b,#242a30);border-bottom:1px solid var(--line)}
+  .card-head-text{flex:1;min-width:0}
+  .alias{font-family:var(--serif);font-size:24px;font-weight:700;letter-spacing:-.02em;line-height:1.05;word-break:break-word}
+  .plate-text{font-size:13px;color:var(--amber);font-weight:600;margin-top:5px;font-family:var(--mono);letter-spacing:.04em}
+  .make{font-size:13px;color:var(--amber);font-weight:600;margin-top:5px}
+  .make .dot{color:var(--ink-4);margin:0 6px}
+
+  .vin-row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+  .vin-row>div:first-child{min-width:0;overflow:hidden}
+  .vin-row .hu{flex-shrink:0;text-align:right}
+  .vin-row .hu .v{color:var(--ink)}
+  .bell{flex-shrink:0;width:36px;height:36px;border-radius:10px;border:1px solid var(--line);
+        background:rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;cursor:pointer;
+        transition:all .15s;position:relative;z-index:3}
+  .bell:hover{border-color:var(--amber);background:var(--amber-bg)}
+  .bell svg{width:17px;height:17px}
+  .bell.on svg{color:var(--amber)}
+  .bell.off svg{color:var(--ink-4)}
+
+  .specs{display:grid;grid-template-columns:1fr 1fr;gap:11px 14px;padding:15px 17px 17px}
+  .specs-2col{grid-template-columns:1fr auto}
+  .specs-2col .ez-cell,.specs-2col .hu-cell{text-align:right}
+  .spec{min-width:0}
+  .spec .k{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+  .spec .v{font-family:var(--mono);font-size:16px;color:var(--ink);margin-top:4px;
+           white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .spec .v .asof{font-size:12.5px;color:var(--ink-3);letter-spacing:.01em;font-weight:400;white-space:nowrap}
+  .spec.wide{grid-column:1 / -1}
+
+  .addcard{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+           min-height:120px;border:1.5px dashed var(--line-hi);border-radius:var(--radius);
+           background:transparent;color:var(--ink-3);cursor:pointer;transition:all .16s;box-shadow:none;padding:18px}
+  .addcard::before{display:none}
+  .addcard:hover{color:var(--amber);border-color:var(--amber);background:var(--amber-bg);transform:translateY(-3px)}
+  .addcard .plus{font-size:30px;line-height:1;font-weight:300}
+  .addcard span{font-size:13.5px;font-weight:600}
+
+  /* ---------- detail sheet ---------- */
+  .scrim{position:fixed;inset:0;background:rgba(10,8,6,.74);backdrop-filter:blur(4px);
+         display:none;align-items:flex-end;justify-content:center;z-index:50}
+  .scrim.open{display:flex}
+  @media(min-width:640px){.scrim{align-items:center;padding:20px}}
+  .sheet{background:var(--bg);border:1px solid var(--line-hi);width:100%;max-width:720px;
+         max-height:92vh;overflow-y:auto;border-radius:22px 22px 0 0;box-shadow:var(--shadow);
+         animation:rise .3s cubic-bezier(.2,.8,.2,1)}
+  @media(min-width:640px){.sheet{border-radius:20px}}
+  @keyframes rise{from{transform:translateY(50px);opacity:.5}to{transform:translateY(0);opacity:1}}
+
+  .sheet-head{position:sticky;top:0;z-index:5;
+              background:linear-gradient(180deg,var(--bg) 68%,transparent);
+              padding:22px 22px 14px;display:flex;align-items:flex-start;gap:14px}
+  .sheet-head .htitle{flex:1;min-width:0}
+  .sheet-head .alias-lg{font-family:var(--serif);font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1}
+  .sheet-head .sub{font-size:14px;color:var(--ink-2);margin-top:7px}
+  .sheet-head .x{flex-shrink:0;width:38px;height:38px;border-radius:11px;border:1px solid var(--line);
+                 background:var(--bg-2);color:var(--ink-2);font-size:18px;cursor:pointer}
+  .sheet-head .x:hover{color:var(--ink);border-color:var(--line-hi)}
+  .sheet-head .edit-btn{flex-shrink:0;width:38px;height:38px;border-radius:11px;border:1px solid var(--line);
+                 background:var(--bg-2);color:var(--amber);font-size:16px;cursor:pointer;transition:all .15s}
+  .sheet-head .edit-btn:hover{background:var(--amber-bg);border-color:var(--amber)}
+  .sheet-head .print-btn{flex-shrink:0;width:38px;height:38px;border-radius:11px;border:1px solid var(--line);
+                 background:var(--bg-2);color:var(--ink-2);font-size:17px;cursor:pointer;transition:all .15s}
+  .sheet-head .print-btn:hover{background:var(--amber-bg);border-color:var(--amber);color:var(--amber)}
+  .sheet-body{padding:2px 22px 30px}
+
+  .sect{margin:24px 0 12px;display:flex;align-items:center;justify-content:space-between}
+  .sect h3{font-family:var(--serif);font-size:17px;font-weight:700;letter-spacing:-.01em}
+  .sect .add-btn{font-size:13px;font-weight:600;color:var(--amber);background:var(--amber-bg);
+                 border:1px solid rgba(240,165,0,.3);border-radius:20px;padding:6px 13px;cursor:pointer;transition:all .15s}
+  .sect .add-btn:hover{background:rgba(240,165,0,.22)}
+
+  /* maintenance interval rows */
+  .mrow{display:flex;align-items:center;gap:13px;padding:13px 15px;background:var(--card);
+        border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:9px;transition:border-color .15s}
+  .mrow:hover{border-color:var(--line-hi)}
+  .mrow .status-bar{width:3px;align-self:stretch;border-radius:3px;flex-shrink:0}
+  .mrow .status-bar.ok{background:var(--ok)}
+  .mrow .status-bar.warn{background:var(--warn)}
+  .mrow .status-bar.danger{background:var(--danger)}
+  .mrow .status-bar.none{background:var(--line-hi)}
+  .mrow .mbody{flex:1;min-width:0}
+  .mrow .mbody b{font-size:16px;font-weight:650;display:block;letter-spacing:-.01em}
+  .mrow .mbody .iv{font-size:13px;color:var(--ink-2);margin-top:4px;font-family:var(--mono)}
+  .mrow .mbody .due{font-size:13px;margin-top:4px;font-weight:600}
+  .mrow .mbody .due.ok{color:var(--ok)}
+  .mrow .mbody .due.warn{color:var(--warn)}
+  .mrow .mbody .due.danger{color:var(--danger)}
+  .mrow .mbody .due.none{color:var(--ink-4)}
+  .mrow .mbell{flex-shrink:0;width:36px;height:36px;border-radius:10px;border:1px solid var(--line);
+               background:var(--well);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s}
+  .mrow .mbell:hover{border-color:var(--amber)}
+  .mrow .mbell svg{width:17px;height:17px}
+  .mrow .mbell.on svg{color:var(--amber)}
+  .mrow .mbell.off svg{color:var(--ink-4)}
+
+  /* merkmale */
+  .merkmal{display:flex;align-items:center;gap:12px;padding:12px 15px;background:var(--card);
+           border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:8px}
+  .merkmal .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+  .merkmal .dot.ok{background:var(--ok);box-shadow:0 0 9px rgba(92,186,125,.6)}
+  .merkmal .dot.warn{background:var(--warn);box-shadow:0 0 9px rgba(232,162,61,.6)}
+  .merkmal .mtext{flex:1;min-width:0}
+  .merkmal .mtext b{font-size:15.5px;font-weight:600;display:block}
+  .merkmal .mtext span{font-size:13.5px;color:var(--ink-2)}
+  .merkmal .method{font-size:12px;color:var(--ink-3);text-align:right;flex-shrink:0;font-family:var(--mono)}
+  .merkmal .del{background:none;border:none;color:var(--ink-4);cursor:pointer;font-size:15px;padding:4px;flex-shrink:0}
+  .merkmal .del:hover{color:var(--danger)}
+  .legend{display:flex;gap:18px;margin:0 2px 14px;font-size:13px;color:var(--ink-2)}
+  .legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+
+  .empty{text-align:center;padding:24px 16px;color:var(--ink-4);font-size:13px;line-height:1.7;
+         border:1.5px dashed var(--line);border-radius:var(--radius-sm)}
+
+  /* stats strip */
+  .stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:6px 0 4px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-sm);padding:11px 11px;min-width:0;overflow:hidden}
+  .stat .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stat .v{font-family:var(--mono);font-size:16px;font-weight:600;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stat .v small{font-size:11.5px;color:var(--ink-3);font-weight:400}
+  .hu-v{display:flex;align-items:center;gap:6px}
+  .hu-bell{flex-shrink:0;width:26px;height:26px;border-radius:7px;border:1px solid var(--line);background:var(--well);
+           display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s}
+  .hu-bell:hover{border-color:var(--amber)}
+  .hu-bell svg{width:14px;height:14px}
+  .hu-bell.on svg{color:var(--amber)}
+  .hu-bell.off svg{color:var(--ink-4)}
+
+  /* forms */
+  .addform{background:var(--well);border:1px solid var(--line);border-radius:var(--radius-sm);padding:15px;display:grid;gap:12px;margin-bottom:10px}
+  .addform .two{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+  .addform .three,.three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:11px}
+  .tk-section{background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:10px}
+  .tk-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .tk-head>span{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);font-weight:600}
+  .tk-lookup{background:var(--amber-bg);border:1px solid rgba(143,184,168,.3);color:var(--amber);
+             border-radius:8px;padding:6px 11px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
+  .tk-lookup:hover{background:rgba(143,184,168,.22)}
+  .techrow{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 4px}
+  .techitem{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:8px 12px;flex:1;min-width:130px}
+  .techitem .tk-k{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-4);font-weight:600}
+  .techitem .tk-v{display:block;font-family:var(--mono);font-size:13.5px;color:var(--ink);margin-top:3px}
+  .field{display:flex;flex-direction:column;gap:6px}
+  .field label{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);font-weight:600}
+  input,select,textarea{background:var(--bg-2);border:1px solid var(--line);border-radius:10px;color:var(--ink);
+    font-family:var(--sans);font-size:15px;padding:11px 13px;width:100%;transition:border-color .15s}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--amber);box-shadow:0 0 0 3px var(--amber-bg)}
+  input::placeholder{color:var(--ink-4)}
+  select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238f8474' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+          background-repeat:no-repeat;background-position:right 13px center;padding-right:32px}
+  .toggle-row{display:flex;gap:8px}
+  .toggle{flex:1;text-align:center;padding:11px;border:1px solid var(--line);border-radius:10px;
+          font-size:13px;cursor:pointer;color:var(--ink-3);background:var(--bg-2);user-select:none;font-weight:600}
+  .toggle.sel-ok{border-color:var(--ok);color:var(--ok);background:var(--ok-bg)}
+  .toggle.sel-warn{border-color:var(--warn);color:var(--warn);background:var(--warn-bg)}
+
+  .btn{background:linear-gradient(180deg,#6cc38a,#57a976);color:#0e1a13;border:none;
+       border-radius:11px;font-family:var(--sans);font-weight:700;font-size:14.5px;padding:12px 18px;cursor:pointer;
+       transition:filter .15s,transform .1s}
+  .btn:hover{filter:brightness(1.06)}
+  .btn:active{transform:scale(.98)}
+  .btn.wide{width:100%;justify-content:center}
+  .btn.ghost{background:transparent;border:1px solid var(--line-hi);color:var(--ink);font-weight:600}
+  .btn.ghost:hover{border-color:var(--amber);color:var(--amber)}
+
+  .quickcap{display:flex;gap:9px;margin:2px 0 8px}
+  .quickcap select,.quickcap input{flex:1}
+
+  /* bordbuch / logbook */
+  .logrow{display:flex;gap:13px;padding:13px 15px;background:var(--card);border:1px solid var(--line);
+          border-radius:var(--radius-sm);margin-bottom:9px}
+  .logrow .when{flex-shrink:0;text-align:center;min-width:52px}
+  .logrow .when .d{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--amber)}
+  .logrow .when .km{font-family:var(--mono);font-size:12px;color:var(--ink-3);margin-top:3px}
+  .logrow .lbody{flex:1;min-width:0;border-left:1px solid var(--line);padding-left:13px}
+  .logrow .lbody b{font-size:15.5px;font-weight:650;display:block;letter-spacing:-.01em}
+  .logrow .lbody .parts{font-size:13.5px;color:var(--ink-2);margin-top:4px;font-family:var(--mono)}
+  .logrow .lbody .cost{font-size:13.5px;color:var(--ink);margin-top:4px;font-weight:600}
+  .logrow .del{background:none;border:none;color:var(--ink-4);cursor:pointer;font-size:15px;padding:2px;flex-shrink:0}
+  .logrow .del:hover{color:var(--danger)}
+
+  /* DTC diagnosis */
+  .dtc-box{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-sm);padding:15px;margin-bottom:4px}
+  .dtc-input{display:flex;gap:9px}
+  .dtc-input input{flex:1;font-family:var(--mono);letter-spacing:.05em;text-transform:uppercase}
+  .dtc-result{margin-top:14px}
+  .dtc-card{background:var(--well);border:1px solid var(--line);border-radius:11px;padding:15px}
+  .dtc-card .code{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--amber);letter-spacing:.03em}
+  .dtc-card .kind{display:inline-block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;
+                  padding:3px 9px;border-radius:20px;margin-left:9px;vertical-align:middle}
+  .dtc-card .kind.generic{background:var(--ok-bg);color:var(--ok);border:1px solid rgba(92,186,125,.3)}
+  .dtc-card .kind.mfr{background:var(--warn-bg);color:var(--warn);border:1px solid rgba(232,162,61,.3)}
+  .dtc-card .meaning{font-size:15px;font-weight:600;margin:11px 0 4px;line-height:1.4}
+  .dtc-card .sys{font-size:12px;color:var(--ink-3);margin-bottom:12px}
+  .dtc-card .causes{font-size:13px;color:var(--ink-2);line-height:1.6}
+  .dtc-card .causes b{color:var(--ink);font-weight:600;display:block;margin-bottom:4px;font-size:11px;text-transform:uppercase;letter-spacing:.07em}
+  .dtc-card .web-btn{display:block;width:100%;text-align:center;margin-top:14px;padding:12px;
+                     background:var(--bg-2);border:1px solid var(--line-hi);border-radius:10px;color:var(--ink);
+                     font-size:13.5px;font-weight:600;text-decoration:none;transition:all .15s}
+  .dtc-card .web-btn:hover{border-color:var(--amber);color:var(--amber)}
+  .dtc-note{font-size:13px;color:var(--ink-3);margin-top:11px;line-height:1.55}
+
+  .divider{height:1px;background:var(--line);margin:22px 0}
+
+  .datatools{display:flex;gap:10px;margin:28px 2px 8px;flex-wrap:wrap}
+  .tool-btn{flex:1;min-width:140px;background:var(--bg-2);border:1px solid var(--line-hi);color:var(--ink-2);
+            border-radius:11px;padding:12px 14px;font-size:13.5px;font-weight:600;cursor:pointer;transition:all .15s;font-family:var(--sans)}
+  .tool-btn:hover{border-color:var(--amber);color:var(--amber);background:var(--amber-bg)}
+  .datatools-hint{font-size:12px;color:var(--ink-4);line-height:1.6;margin:2px 2px 0}
+
+  .vin-decode{font-size:13px;padding:9px 12px;border-radius:9px;line-height:1.5}
+  .vin-decode.ok{background:var(--ok-bg);border:1px solid rgba(108,195,138,.3);color:var(--ok)}
+  .vin-decode.warn{background:var(--warn-bg);border:1px solid rgba(220,176,74,.3);color:var(--warn)}
+  .vin-decode b{font-weight:700}
+  .vin-decode .nt{display:block;font-size:11.5px;color:var(--ink-3);margin-top:3px;font-weight:400}
+  .vin-online-btn{display:block;width:100%;margin-top:9px;background:var(--amber-bg);border:1px solid rgba(143,184,168,.35);
+                  color:var(--amber);border-radius:8px;padding:9px;font-size:12.5px;font-weight:600;cursor:pointer;transition:all .15s}
+  .vin-online-btn:hover{background:rgba(143,184,168,.22)}
+  .equip-btn{display:block;width:100%;margin-top:2px;background:transparent;border:1px solid var(--line-hi);
+             color:var(--ink-2);border-radius:8px;padding:10px;font-size:12.5px;font-weight:600;cursor:pointer;transition:all .15s}
+  .equip-btn:hover{border-color:var(--amber);color:var(--amber)}
+  .btn-delete{display:block;width:100%;margin-top:16px;background:transparent;border:1px solid rgba(226,104,90,.4);
+              color:var(--danger);border-radius:10px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
+  .btn-delete:hover{background:var(--danger-bg);border-color:var(--danger)}
+  .archive-toggle{display:block;width:100%;margin:20px 0 4px;background:transparent;border:1px dashed var(--line-hi);
+                  color:var(--ink-3);border-radius:10px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;font-family:var(--sans)}
+  .archive-toggle:hover{border-color:var(--ink-3);color:var(--ink-2)}
+  #archive-grid{margin-top:12px}
+  .card-archived{opacity:.72}
+  .card-archived::before{background:linear-gradient(var(--ink-4),var(--ink-4))}
+  .arch-tag{display:inline-block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;
+            color:var(--ink-3);background:var(--bg-2);border:1px solid var(--line-hi);border-radius:5px;padding:2px 7px;margin-left:9px;vertical-align:middle}
+  .arch-banner{background:var(--bg-2);border:1px solid var(--line-hi);border-radius:12px;padding:14px;margin-bottom:16px;
+               font-size:13.5px;color:var(--ink-2);line-height:1.5}
+  .arch-actions{display:flex;gap:10px;margin-top:12px}
+  .arch-actions .btn,.arch-actions .btn-delete{flex:1;margin-top:0}
+
+  /* OCR scan box */
+  .scan-box{margin-bottom:16px}
+  .scan-btn{display:block;text-align:center;padding:14px;border:1.5px dashed var(--line-hi);border-radius:12px;
+            color:var(--amber);font-size:14px;font-weight:600;cursor:pointer;transition:all .15s;background:var(--amber-bg)}
+  .scan-btn:hover{border-color:var(--amber)}
+  .scan-msg{font-size:13px;padding:10px 12px;border-radius:9px;margin-top:10px;line-height:1.5;background:var(--bg-2);border:1px solid var(--line)}
+  .scan-msg.ok{background:var(--ok-bg);border-color:rgba(108,195,138,.3);color:var(--ok)}
+  .scan-msg.warn{background:var(--warn-bg);border-color:rgba(220,176,74,.3);color:var(--warn)}
+  .scan-msg .nt{color:var(--ink-3);font-size:11.5px}
+  .scan-chip{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);
+             border-radius:10px;padding:10px 12px;margin-top:8px;transition:all .15s}
+  .scan-chip.accepted{border-color:var(--ok);background:var(--ok-bg)}
+  .scan-chip .chip-info{flex:1;min-width:0}
+  .scan-chip .chip-label{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);font-weight:600;margin-bottom:4px}
+  .scan-chip .chip-edit{width:100%;background:var(--well);border:1px solid var(--line-hi);border-radius:7px;
+                        color:var(--ink);font-family:var(--mono);font-size:15px;padding:7px 10px}
+  .scan-chip .chip-edit:focus{outline:none;border-color:var(--amber);box-shadow:0 0 0 3px var(--amber-bg)}
+  .scan-chip .chip-ok{flex-shrink:0;background:var(--ok);color:#0e1a13;border:none;border-radius:8px;
+                      padding:8px 12px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .scan-chip .chip-ok:disabled{opacity:.6;cursor:default}
+  .diag-btn{margin-top:8px;background:transparent;border:1px solid var(--line-hi);color:var(--ink-3);
+            border-radius:8px;padding:7px 12px;font-size:12px;cursor:pointer;transition:all .15s}
+  .diag-btn:hover{border-color:var(--amber);color:var(--amber)}
+  .raw-text{background:var(--well);border:1px solid var(--line);border-radius:9px;padding:12px;margin:8px 0}
+  .raw-text .raw-head{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);font-weight:600;margin-bottom:8px}
+  .raw-text pre{font-family:var(--mono);font-size:11px;color:var(--ink-2);white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;margin:0}
+  .hint{font-size:13px;color:var(--ink-3);line-height:1.65;margin:8px 2px 0}
+
+  .toast{position:fixed;left:50%;bottom:calc(26px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);
+         background:var(--card-hi);border:1px solid var(--line-hi);color:var(--ink);padding:13px 19px;border-radius:13px;
+         font-size:13.5px;box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:all .25s;z-index:80;display:flex;gap:10px;align-items:center}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast .tk{color:var(--ok);font-weight:700}
+  /* ---------- print / PDF ---------- */
+  #print-holder{display:none}
+  @media print{
+    @page{size:A4;margin:14mm}
+    body{background:#fff !important}
+    body>*{display:none !important}
+    #print-holder{display:block !important}
+    .print-doc{color:#111;font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:11pt;line-height:1.4}
+    .print-doc .p-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:14px}
+    .print-doc h1{font-size:22pt;margin:0;letter-spacing:-.01em}
+    .print-doc .p-sub{font-size:11pt;color:#444;margin-top:3px}
+    .print-doc .p-brand{text-align:right;font-size:11pt;font-weight:700}
+    .print-doc .p-brand span{font-weight:400;font-size:9pt;color:#666}
+    .print-doc h2{font-size:13pt;margin:18px 0 6px;padding-bottom:3px;border-bottom:1px solid #bbb}
+    .print-doc table{width:100%;border-collapse:collapse;margin-bottom:6px}
+    .print-doc .p-kv{table-layout:fixed}
+    .print-doc .p-kv th{width:16%;text-align:left;color:#555;font-size:9pt;text-transform:uppercase;letter-spacing:.02em;padding:5px 8px 5px 0;vertical-align:top;font-weight:600}
+    .print-doc .p-kv td{width:34%;padding:5px 12px 5px 0;font-size:10.5pt;vertical-align:top;word-break:break-all}
+    .print-doc .p-tbl th{text-align:left;background:#f0f0f0;border:1px solid #ccc;padding:5px 7px;font-size:9.5pt;text-transform:uppercase;letter-spacing:.02em}
+    .print-doc .p-tbl td{border:1px solid #ccc;padding:5px 7px;font-size:10.5pt;vertical-align:top}
+    .print-doc .p-tbl .sub{color:#666;font-size:9.5pt}
+    .print-doc .p-foot{margin-top:20px;padding-top:8px;border-top:1px solid #bbb;font-size:9pt;color:#888;text-align:center}
+    .scrim,.toast{display:none !important}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="mast">
+    <div class="brand">
+      <b>KFZ<em>·</em>Manager</b>
+      <span>Fuhrpark &amp; Wartung</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="count" id="count"></div>
+  </div>
+  <div class="fleet" id="fleet"></div>
+
+  <div id="archive-wrap" style="display:none">
+    <button id="archive-toggle" class="archive-toggle" onclick="toggleArchive()">▸ Archiv anzeigen</button>
+    <div id="archive-grid" class="fleet" style="display:none"></div>
+  </div>
+
+  <div class="datatools">
+    <button class="tool-btn" onclick="exportData()">↓ Daten sichern</button>
+    <button class="tool-btn" onclick="document.getElementById('import-file').click()">↑ Daten laden</button>
+    <input type="file" id="import-file" accept="application/json,.json" style="display:none" onchange="importData(event)">
+  </div>
+  <div class="datatools-hint">Sichere deine Fahrzeuge regelmäßig als Datei (z. B. in iCloud Drive). Sonst gehen sie verloren, wenn der Safari-Speicher gelöscht wird oder du das Gerät wechselst.</div>
+</div>
+
+<div class="scrim" id="scrim"><div class="sheet" id="sheet"></div></div>
+<div class="toast" id="toast"><span class="tk">✓</span><span id="toast-msg"></span></div>
+
+<!-- SVG bell defs -->
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="bell-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+  </symbol>
+  <symbol id="bell-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><line x1="3" y1="3" x2="21" y2="21"/>
+  </symbol>
+</svg>
+
+<script>
+/* ============ DATA ============ */
+const SEED = {
+  vehicles:[],
+};
+function defaultWartung(){
+  return [
+    {name:"Öl + Ölfilter",       iv_km:15000, iv_months:12, last_km:null, last_date:null, notify:true},
+    {name:"Zahnriemen / Steuerkette", iv_km:120000, iv_months:72, last_km:null, last_date:null, notify:true},
+    {name:"Luft- / Innenraumfilter",  iv_km:30000, iv_months:24, last_km:null, last_date:null, notify:true},
+  ];
+}
+const METHODS=["gemessen","abgelesen (Bauteil)","aus Papieren","aus Datenträger/Aufkleber","recherchiert (unbestätigt)"];
+
+let DB=load();
+function load(){try{const s=localStorage.getItem("kfzmanager");if(s)return migrate(JSON.parse(s));}catch(e){}return structuredClone(SEED);}
+function migrate(d){ // ensure new fields exist on older saved data
+  d.vehicles?.forEach(v=>{
+    if(!v.wartung) v.wartung=defaultWartung();
+    if(v.notify===undefined) v.notify=false;
+    if(!v.ez) v.ez="—"; if(!v.hsn) v.hsn="—"; if(!v.tsn) v.tsn="—";
+    if(!v.merkmale) v.merkmale=[];
+    if(!v.log) v.log=[];
+    if(!v.km_date) v.km_date=null;
+    if(v.kennz===undefined) v.kennz="";
+    if(v.hu===undefined) v.hu="";
+    ["hubraum","leistung","kraftstoff","reifen","tkHP","tkTK","tkVK"].forEach(f=>{if(v[f]===undefined)v[f]="";});
+  });
+  return d;
+}
+function save(){try{localStorage.setItem("kfzmanager",JSON.stringify(DB));}catch(e){}}
+
+const num=n=>Number(n).toLocaleString("de-DE");
+function bellSvg(on){return `<svg><use href="#${on?'bell-on':'bell-off'}"/></svg>`;}
+function techInfoRow(v){
+  const items=[];
+  if(v.leistung||v.hubraum){items.push(["Motor",[v.hubraum,v.leistung,v.kraftstoff].filter(Boolean).join(" · ")]);}
+  const tk=[v.tkHP&&"HP "+v.tkHP,v.tkTK&&"TK "+v.tkTK,v.tkVK&&"VK "+v.tkVK].filter(Boolean).join(" / ");
+  if(tk)items.push(["Typklassen",tk]);
+  if(!items.length)return "";
+  return `<div class="techrow">${items.map(([k,val])=>
+    `<div class="techitem"><span class="tk-k">${k}</span><span class="tk-v">${esc(val)}</span></div>`).join("")}</div>`;
+}
+function renderPlate(kennz){
+  // realistic German plate: blue EU band with D, white body, black chars
+  return `<div class="plate"><span class="plate-eu"><span class="stars"></span><span class="d">D</span></span><span class="plate-num">${esc(kennz)}</span></div>`;
+}
+
+/* ============ FLEET (home) ============ */
+function renderFleet(){
+  const el=document.getElementById("fleet");el.innerHTML="";
+  const active=DB.vehicles.filter(v=>!v.archived);
+  const archived=DB.vehicles.filter(v=>v.archived);
+  const makeCard=(v)=>{
+    const card=document.createElement("div");card.className="card"+(v.archived?" card-archived":"");
+    card.onclick=(e)=>{ if(e.target.closest('.bell'))return; openDetail(v.id); };
+    card.innerHTML=`
+      <div class="card-head">
+        <div class="card-head-text">
+          <div class="alias">${esc(v.alias)}${v.archived?'<span class="arch-tag">Archiv</span>':''}</div>
+          ${v.kennz?`<div class="plate-text">${esc(v.kennz)}</div>`:''}
+          <div class="make">${esc(v.make)}<span class="dot">·</span>${esc(v.model)}</div>
+        </div>
+        ${v.archived?'':`<div class="bell ${v.notify?'on':'off'}" onclick="toggleVehNotify('${v.id}',event)"
+             title="${v.notify?'Benachrichtigungen aktiv':'Benachrichtigungen aus'}">${bellSvg(v.notify)}</div>`}
+      </div>
+      <div class="specs specs-2col">
+        <div class="spec vin-cell"><div class="k">VIN</div><div class="v">${esc(v.vin)}</div></div>
+        <div class="spec ez-cell"><div class="k">Erstzulassung</div><div class="v">${esc(v.ez)}</div></div>
+        <div class="spec km-cell"><div class="k">Kilometerstand</div><div class="v">${num(v.km)} km${v.km_date?`<span class="asof"> · ${fmtDateShort(v.km_date)}</span>`:''}</div></div>
+        <div class="spec hu-cell"><div class="k">HU fällig</div><div class="v">${v.hu?esc(v.hu):'—'}</div></div>
+      </div>`;
+    return card;
+  };
+  active.forEach(v=>el.appendChild(makeCard(v)));
+  const add=document.createElement("div");add.className="card addcard";add.onclick=addVehicle;
+  add.innerHTML=`<span class="plus">+</span><span>Fahrzeug hinzufügen</span>`;
+  el.appendChild(add);
+  document.getElementById("count").textContent=active.length+" Fahrzeuge";
+
+  // archive toggle + section
+  const arcWrap=document.getElementById("archive-wrap");
+  if(archived.length){
+    arcWrap.style.display="block";
+    document.getElementById("archive-toggle").textContent=
+      (window._showArchive?"▾ Archiv verbergen":"▸ Archiv anzeigen")+` (${archived.length})`;
+    const grid=document.getElementById("archive-grid");
+    grid.style.display=window._showArchive?"grid":"none";
+    grid.innerHTML="";
+    if(window._showArchive)archived.forEach(v=>grid.appendChild(makeCard(v)));
+  }else{
+    arcWrap.style.display="none";
+  }
+}
+function toggleArchive(){window._showArchive=!window._showArchive;renderFleet();}
+function toggleVehNotify(id,ev){ev.stopPropagation();const v=DB.vehicles.find(x=>x.id===id);v.notify=!v.notify;save();renderFleet();
+  toast(v.notify?`Benachrichtigungen für ${v.alias} an`:`Benachrichtigungen für ${v.alias} aus`);}
+
+/* ============ DETAIL ============ */
+let currentVid=null;
+function openDetail(vid){
+  currentVid=vid;const v=DB.vehicles.find(x=>x.id===vid);
+  const ro=!!v.archived; // read-only when archived
+  document.getElementById("sheet").innerHTML=`
+    <div class="sheet-head">
+      <div class="htitle">
+        <div class="alias-lg">${esc(v.alias)}${ro?'<span class="arch-tag">Archiv</span>':''}</div>
+        <div class="sub">${esc(v.make)} ${esc(v.model)} · EZ ${esc(v.ez)} · ${esc(v.id)}</div>
+      </div>
+      <button class="print-btn" onclick="printVehicle()" title="Als PDF / drucken">⎙</button>
+      ${ro?'':`<button class="edit-btn" onclick="editVehicleForm()" title="Fahrzeugdaten bearbeiten">✎</button>`}
+      <button class="x" onclick="closeDetail()">✕</button>
+    </div>
+    <div class="sheet-body">
+      ${ro?`<div class="arch-banner">📦 Archiviertes Fahrzeug (z. B. verkauft) — nur zur Ansicht.
+        <div class="arch-actions">
+          <button class="btn" onclick="unarchiveVehicle('${esc(v.id)}')">Wieder aktivieren</button>
+          <button class="btn-delete" style="margin-top:0" onclick="deleteVehicle('${esc(v.id)}')">🗑 Endgültig löschen</button>
+        </div></div>`:''}
+      <div class="stats">
+        <div class="stat"><div class="k">Kilometerstand</div><div class="v">${num(v.km)}<small> km</small></div></div>
+        <div class="stat hu-stat"><div class="k">HU/AU gültig bis</div>
+          <div class="v hu-v">${v.hu?esc(v.hu):'—'}${ro?'':`<span class="hu-bell ${v.notify?'on':'off'}" onclick="toggleVehNotify('${v.id}',event)" title="${v.notify?'HU-Erinnerung aktiv':'HU-Erinnerung aus'}">${bellSvg(v.notify)}</span>`}</div></div>
+        <div class="stat"><div class="k">HSN / TSN</div><div class="v" style="font-size:14px;white-space:nowrap">${esc(v.hsn)}·${esc(v.tsn)}</div></div>
+      </div>
+      ${techInfoRow(v)}
+
+      ${ro?'':`<div class="quickcap">
+        <input id="qc-km" type="number" inputmode="numeric" placeholder="km-Stand aktualisieren …">
+        <button class="btn" onclick="updateKm()">Setzen</button>
+      </div>`}
+
+      <div class="sect"><h3>Wartungsintervalle</h3>
+        ${ro?'':`<button class="add-btn" onclick="addWartungForm()">+ Intervall</button>`}</div>
+      <div id="wartung-form"></div>
+      <div id="wartung-list"></div>
+
+      <div class="sect"><h3>Bordbuch</h3>
+        ${ro?'':`<button class="add-btn" onclick="toggleLogForm()">+ Eintrag</button>`}</div>
+      <div id="log-form"></div>
+      <div id="log-list"></div>
+
+      ${ro?'':`<div class="sect"><h3>Fehlerdiagnose</h3></div>
+      <div class="dtc-box">
+        <div class="dtc-input">
+          <input id="dtc-code" placeholder="Fehlercode, z. B. P0130" maxlength="7"
+                 oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')lookupDtc()">
+          <button class="btn" onclick="lookupDtc()">Nachschlagen</button>
+        </div>
+        <div id="dtc-result"></div>
+      </div>`}
+
+      <div class="sect"><h3>Ausstattung &amp; Merkmale</h3>
+        ${ro?'':`<button class="add-btn" onclick="toggleMerkmalForm()">+ Merkmal</button>`}</div>
+      <div class="legend"><span><i style="background:var(--ok)"></i>bestätigt</span><span><i style="background:var(--warn)"></i>noch zu prüfen</span></div>
+      <div id="merkmal-form"></div>
+      <div id="merkmal-list"></div>
+
+      <div class="divider"></div>
+      <div class="hint">${ro?'Dies ist ein archiviertes Fahrzeug. Alle Daten bleiben zur Ansicht erhalten, können aber nicht mehr geändert werden. Über „Wieder aktivieren" holst du es zurück in die Übersicht.':'Wartungsintervalle werden fällig nach Kilometern <b>oder</b> Zeit — je nachdem, was zuerst eintritt. Das Bordbuch protokolliert ausgeführte Arbeiten und getauschte Teile. Ein Fehlercode weist auf ein System hin, nicht auf ein garantiert defektes Teil — erst prüfen, dann tauschen.'}</div>
+    </div>`;
+  renderWartung(ro);renderLog(ro);renderMerkmale(ro);
+  document.getElementById("scrim").classList.add("open");document.body.style.overflow="hidden";
+}
+function closeDetail(){document.getElementById("scrim").classList.remove("open");document.body.style.overflow="";currentVid=null;}
+
+function updateKm(){
+  const v=DB.vehicles.find(x=>x.id===currentVid);
+  const val=parseInt(document.getElementById("qc-km").value.replace(/\D/g,""),10);
+  if(!val||val<=0){toast("Bitte gültigen Kilometerstand eingeben","warn");return;}
+  if(val<v.km && !confirm("Neuer Wert ist kleiner als bisher ("+num(v.km)+" km). Trotzdem setzen?"))return;
+  v.km=val;v.km_date=new Date().toISOString().slice(0,10);save();renderFleet();openDetail(currentVid);toast("Kilometerstand: "+num(val)+" km");
+}
+
+/* ---- Wartung ---- */
+function dueStatus(w,curKm){
+  // returns {level:'ok'|'warn'|'danger'|'none', text}
+  if(w.last_km==null && w.last_date==null){
+    return {level:'none',text:'noch nicht erfasst — bitte letzte Ausführung eintragen'};
+  }
+  let kmLeft=null, dateLeft=null;
+  if(w.iv_km && w.last_km!=null) kmLeft = (w.last_km + w.iv_km) - curKm;
+  if(w.iv_months && w.last_date){
+    const due=new Date(w.last_date); due.setMonth(due.getMonth()+w.iv_months);
+    dateLeft = Math.round((due - new Date())/(1000*60*60*24)); // days
+  }
+  const parts=[];let level='ok';
+  if(kmLeft!=null){
+    parts.push(kmLeft>=0?`noch ${num(kmLeft)} km`:`${num(-kmLeft)} km überfällig`);
+    if(kmLeft<0)level='danger';else if(kmLeft<1500 && level!=='danger')level='warn';
+  }
+  if(dateLeft!=null){
+    if(dateLeft>=0){const m=Math.round(dateLeft/30);parts.push(m>=1?`noch ${m} Mon.`:`noch ${dateLeft} Tage`);}
+    else parts.push(`${Math.round(-dateLeft/30)} Mon. überfällig`);
+    if(dateLeft<0)level='danger';else if(dateLeft<45 && level!=='danger')level='warn';
+  }
+  return {level,text:parts.join(' · ')};
+}
+function ivText(w){
+  const a=[];if(w.iv_km)a.push(`alle ${num(w.iv_km)} km`);if(w.iv_months)a.push(`alle ${w.iv_months} Mon.`);
+  return a.join(' oder ')||'kein Intervall';
+}
+function renderWartung(ro){
+  const v=DB.vehicles.find(x=>x.id===currentVid);const list=document.getElementById("wartung-list");
+  list.innerHTML=v.wartung.map((w,i)=>{
+    const st=dueStatus(w,v.km);
+    return `<div class="mrow">
+      <div class="status-bar ${st.level}"></div>
+      <div class="mbody">
+        <b>${esc(w.name)}</b>
+        <div class="iv">${ivText(w)}${w.last_km!=null?` · zuletzt bei ${num(w.last_km)} km`:''}${w.last_date?` · ${fmtDate(w.last_date)}`:''}</div>
+        <div class="due ${st.level}">${st.text}</div>
+      </div>
+      ${ro?'':`<div class="mbell ${w.notify?'on':'off'}" onclick="toggleWartungNotify(${i})" title="${w.notify?'Erinnerung an':'Erinnerung aus'}">${bellSvg(w.notify)}</div>
+      <button class="del" onclick="editWartung(${i})" title="Bearbeiten" style="background:none;border:none;color:var(--ink-4);cursor:pointer;font-size:15px;padding:4px">✎</button>`}
+    </div>`;
+  }).join("");
+}
+function toggleWartungNotify(i){const v=DB.vehicles.find(x=>x.id===currentVid);v.wartung[i].notify=!v.wartung[i].notify;save();renderWartung();
+  document.querySelector('.stats .stat:nth-child(3) .v').textContent=v.wartung.filter(w=>w.notify).length+' aktiv';}
+
+let editingW=null;
+function addWartungForm(){editingW=null;showWartungForm({name:"",iv_km:"",iv_months:"",last_km:"",last_date:"",notify:true});}
+function editWartung(i){editingW=i;const w=DB.vehicles.find(x=>x.id===currentVid).wartung[i];
+  showWartungForm({...w,last_date:w.last_date||"",last_km:w.last_km??"",iv_km:w.iv_km??"",iv_months:w.iv_months??""});}
+function showWartungForm(w){
+  document.getElementById("wartung-form").innerHTML=`
+    <div class="addform">
+      <div class="field"><label>Wartung / Position</label>
+        <input id="w-name" value="${esc(w.name)}" placeholder="z. B. Bremsflüssigkeit"></div>
+      <div class="two">
+        <div class="field"><label>Intervall km</label>
+          <input id="w-ivkm" type="number" inputmode="numeric" value="${w.iv_km}" placeholder="z. B. 15000"></div>
+        <div class="field"><label>Intervall Monate</label>
+          <input id="w-ivm" type="number" inputmode="numeric" value="${w.iv_months}" placeholder="z. B. 12"></div>
+      </div>
+      <div class="two">
+        <div class="field"><label>Zuletzt bei km</label>
+          <input id="w-lastkm" type="number" inputmode="numeric" value="${w.last_km}" placeholder="optional"></div>
+        <div class="field"><label>Zuletzt am</label>
+          <input id="w-lastdate" type="date" value="${w.last_date}"></div>
+      </div>
+      <div class="two">
+        <button class="btn wide" onclick="saveWartung()">Speichern</button>
+        <button class="btn ghost wide" onclick="cancelWartung()">${editingW!=null?'Löschen':'Abbrechen'}</button>
+      </div>
+    </div>`;
+  document.getElementById("wartung-form").scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+function saveWartung(){
+  const v=DB.vehicles.find(x=>x.id===currentVid);
+  const g=id=>document.getElementById(id).value.trim();
+  const name=g("w-name");if(!name){toast("Bitte einen Namen angeben","warn");return;}
+  const obj={name,
+    iv_km:g("w-ivkm")?parseInt(g("w-ivkm").replace(/\D/g,""),10):null,
+    iv_months:g("w-ivm")?parseInt(g("w-ivm").replace(/\D/g,""),10):null,
+    last_km:g("w-lastkm")?parseInt(g("w-lastkm").replace(/\D/g,""),10):null,
+    last_date:g("w-lastdate")||null,
+    notify:editingW!=null?v.wartung[editingW].notify:true};
+  if(editingW!=null)v.wartung[editingW]=obj;else v.wartung.push(obj);
+  save();document.getElementById("wartung-form").innerHTML="";renderWartung();
+  toast(editingW!=null?"Intervall aktualisiert":"Intervall hinzugefügt");editingW=null;
+}
+function cancelWartung(){
+  if(editingW!=null){const v=DB.vehicles.find(x=>x.id===currentVid);
+    if(confirm("Dieses Wartungsintervall löschen?")){v.wartung.splice(editingW,1);save();renderWartung();toast("Intervall gelöscht");}}
+  document.getElementById("wartung-form").innerHTML="";editingW=null;
+}
+
+/* ---- Merkmale ---- */
+function renderMerkmale(ro){
+  const v=DB.vehicles.find(x=>x.id===currentVid);const list=document.getElementById("merkmal-list");
+  if(!v.merkmale.length){list.innerHTML=`<div class="empty">${ro?'Keine Merkmale erfasst.':'Noch keine Merkmale erfasst.<br>Trag das erste geklärte Detail ein — Motorcode, Bremsscheiben-Ø, Fahrwerk …'}</div>`;return;}
+  list.innerHTML=v.merkmale.map((m,i)=>`
+    <div class="merkmal">
+      <span class="dot ${m.bestaetigt?'ok':'warn'}"></span>
+      <div class="mtext"><b>${esc(m.bauteil)}</b><span>${esc(m.wert)}</span></div>
+      <div class="method">${esc(m.methode||"")}</div>
+      ${ro?'':`<button class="del" onclick="delMerkmal(${i})">✕</button>`}
+    </div>`).join("");
+}
+let mConfirmed=true;
+function toggleMerkmalForm(){
+  const slot=document.getElementById("merkmal-form");
+  if(slot.innerHTML){slot.innerHTML="";return;}
+  mConfirmed=true;
+  const ex=[["Fahrwerk","Sportfahrwerk"],["Scheinwerfer","Bi-Xenon Kurvenlicht"],["Bremse vorn","Ø 288 mm belüftet"],["Anhängerkupplung","abnehmbar, 13-polig"]];
+  const p=ex[Math.floor(Math.random()*ex.length)];
+  slot.innerHTML=`
+    <div class="addform">
+      <div class="two">
+        <div class="field"><label>Bauteil</label><input id="m-b" placeholder="z. B. ${p[0]}"></div>
+        <div class="field"><label>Wert / Typ</label><input id="m-w" placeholder="z. B. ${p[1]}"></div>
+      </div>
+      <div class="field"><label>Wie festgestellt</label>
+        <select id="m-m">${METHODS.map(x=>`<option>${x}</option>`).join("")}</select></div>
+      <div class="field"><label>Status</label>
+        <div class="toggle-row">
+          <div class="toggle sel-ok" id="tg-ok" onclick="setMC(true)">● bestätigt</div>
+          <div class="toggle" id="tg-warn" onclick="setMC(false)">● noch zu prüfen</div>
+        </div></div>
+      <button class="btn wide" onclick="saveMerkmal()">Merkmal speichern</button>
+    </div>`;
+}
+function setMC(val){mConfirmed=val;
+  document.getElementById("tg-ok").className="toggle"+(val?" sel-ok":"");
+  document.getElementById("tg-warn").className="toggle"+(!val?" sel-warn":"");
+  if(!val)document.getElementById("m-m").value="recherchiert (unbestätigt)";}
+function saveMerkmal(){
+  const b=document.getElementById("m-b").value.trim(),w=document.getElementById("m-w").value.trim(),m=document.getElementById("m-m").value;
+  if(!b||!w){toast("Bitte Bauteil und Wert angeben","warn");return;}
+  DB.vehicles.find(x=>x.id===currentVid).merkmale.push({bauteil:b,wert:w,bestaetigt:mConfirmed,methode:m});
+  save();document.getElementById("merkmal-form").innerHTML="";renderMerkmale();
+  toast(mConfirmed?"Merkmal bestätigt gespeichert":"Merkmal als zu prüfen gespeichert");
+}
+function delMerkmal(i){const v=DB.vehicles.find(x=>x.id===currentVid);v.merkmale.splice(i,1);save();renderMerkmale();}
+
+/* ---- Bordbuch (logbook) ---- */
+function renderLog(ro){
+  const v=DB.vehicles.find(x=>x.id===currentVid);const list=document.getElementById("log-list");
+  if(!v.log.length){list.innerHTML=`<div class="empty">${ro?'Keine Bordbuch-Einträge.':'Noch keine Einträge.<br>Protokolliere ausgeführte Arbeiten oder getauschte Teile — z. B. „Lambdasonde gewechselt" oder „Neue Reifen montiert".'}</div>`;return;}
+  const sorted=[...v.log].map((e,idx)=>({...e,_i:idx})).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  list.innerHTML=sorted.map(e=>`
+    <div class="logrow">
+      <div class="when"><div class="d">${fmtDateShort(e.date)}</div>${e.km?`<div class="km">${num(e.km)} km</div>`:''}</div>
+      <div class="lbody">
+        <b>${esc(e.text)}</b>
+        ${e.parts?`<div class="parts">🔧 ${esc(e.parts)}</div>`:''}
+        ${e.cost?`<div class="cost">${Number(e.cost).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2})} €</div>`:''}
+      </div>
+      ${ro?'':`<button class="del" onclick="delLog(${e._i})" title="Löschen">✕</button>`}
+    </div>`).join("");
+}
+function toggleLogForm(){
+  const slot=document.getElementById("log-form");
+  if(slot.innerHTML){slot.innerHTML="";return;}
+  const v=DB.vehicles.find(x=>x.id===currentVid);
+  const today=new Date().toISOString().slice(0,10);
+  slot.innerHTML=`
+    <div class="addform">
+      <div class="field"><label>Was wurde gemacht?</label>
+        <input id="l-text" placeholder="z. B. Lambdasonde gewechselt"></div>
+      <div class="two">
+        <div class="field"><label>Datum</label><input id="l-date" type="date" value="${today}"></div>
+        <div class="field"><label>Kilometerstand</label><input id="l-km" type="number" inputmode="numeric" value="${v.km}"></div>
+      </div>
+      <div class="two">
+        <div class="field"><label>Getauschte Teile (optional)</label><input id="l-parts" placeholder="z. B. Bosch LSU 4.9 / OEM-Nr."></div>
+        <div class="field"><label>Kosten € (optional)</label><input id="l-cost" type="number" inputmode="decimal" placeholder="z. B. 120"></div>
+      </div>
+      <button class="btn wide" onclick="saveLog()">Eintrag speichern</button>
+    </div>`;
+  slot.scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+function saveLog(){
+  const v=DB.vehicles.find(x=>x.id===currentVid);
+  const g=id=>document.getElementById(id).value.trim();
+  const text=g("l-text");if(!text){toast("Bitte beschreiben, was gemacht wurde","warn");return;}
+  const km=g("l-km")?parseInt(g("l-km").replace(/\D/g,""),10):null;
+  v.log.push({date:g("l-date")||new Date().toISOString().slice(0,10),km,
+    text,parts:g("l-parts")||"",cost:g("l-cost")?parseFloat(g("l-cost").replace(",",".")):0});
+  // if km entered is higher than current, offer to update odometer
+  if(km && km>v.km){v.km=km;v.km_date=g("l-date")||new Date().toISOString().slice(0,10);}
+  save();document.getElementById("log-form").innerHTML="";renderLog();renderFleet();
+  toast("Bordbuch-Eintrag gespeichert");
+}
+function delLog(i){const v=DB.vehicles.find(x=>x.id===currentVid);
+  if(confirm("Diesen Bordbuch-Eintrag löschen?")){v.log.splice(i,1);save();renderLog();}}
+
+/* ---- Fehlerdiagnose (OBD-II DTC lookup) ---- */
+/* Generic P0 codes are SAE-standardized (same meaning on every car).
+   Small built-in table of the most common ones; anything else still
+   gets a structured card + a web-search button. */
+const DTC_DB={
+  "P0100":{m:"Luftmassenmesser (LMM) — Fehlfunktion Stromkreis",s:"Gemischbildung / Luftmessung",c:["Luftmassenmesser verschmutzt oder defekt","Steckverbinder / Kabelbaum am LMM","Falschluft im Ansaugtrakt"]},
+  "P0101":{m:"Luftmassenmesser — Bereich/Leistung",s:"Gemischbildung / Luftmessung",c:["LMM verschmutzt","Luftfilter zugesetzt","Undichtigkeit Ansaugung"]},
+  "P0130":{m:"Lambdasonde Bank 1 Sensor 1 — Fehlfunktion",s:"Abgas / Gemischregelung",c:["Lambdasonde (vor Kat) defekt","Kabel/Stecker der Sonde","Abgasleck vor der Sonde"]},
+  "P0133":{m:"Lambdasonde B1 S1 — langsame Reaktion",s:"Abgas / Gemischregelung",c:["Sonde gealtert/träge","Falschluft","Sondenheizung schwach"]},
+  "P0135":{m:"Lambdasonde B1 S1 Heizung — Stromkreis",s:"Abgas / Gemischregelung",c:["Heizelement der Sonde defekt","Sicherung/Relais Sondenheizung","Kabelbruch"]},
+  "P0171":{m:"Gemisch zu mager (Bank 1)",s:"Gemischbildung",c:["Falschluft (Unterdruckschläuche)","LMM ungenau","Kraftstoffdruck zu niedrig / Filter","undichte Ansaugdichtung"]},
+  "P0172":{m:"Gemisch zu fett (Bank 1)",s:"Gemischbildung",c:["Einspritzdüse undicht","Kraftstoffdruck zu hoch","LMM/Lambdasonde fehlerhaft"]},
+  "P0300":{m:"Zündaussetzer — mehrere/zufällige Zylinder",s:"Zündung / Verbrennung",c:["Zündkerzen/Zündspulen","Falschluft, mageres Gemisch","niedrige Kompression","Einspritzung"]},
+  "P0301":{m:"Zündaussetzer Zylinder 1",s:"Zündung / Verbrennung",c:["Zündkerze/Zündspule Zyl.1","Einspritzdüse Zyl.1","Kompression Zyl.1"]},
+  "P0302":{m:"Zündaussetzer Zylinder 2",s:"Zündung / Verbrennung",c:["Zündkerze/Zündspule Zyl.2","Einspritzdüse Zyl.2","Kompression Zyl.2"]},
+  "P0303":{m:"Zündaussetzer Zylinder 3",s:"Zündung / Verbrennung",c:["Zündkerze/Zündspule Zyl.3","Einspritzdüse Zyl.3","Kompression Zyl.3"]},
+  "P0304":{m:"Zündaussetzer Zylinder 4",s:"Zündung / Verbrennung",c:["Zündkerze/Zündspule Zyl.4","Einspritzdüse Zyl.4","Kompression Zyl.4"]},
+  "P0340":{m:"Nockenwellensensor — Stromkreis",s:"Motorsteuerung",c:["Nockenwellensensor defekt","Kabel/Stecker","Geberrad beschädigt"]},
+  "P0401":{m:"Abgasrückführung (AGR) — Durchfluss zu gering",s:"Abgas / AGR",c:["AGR-Ventil verkokt/klemmt","AGR-Kanäle verstopft","Steuerung/Unterdruck"]},
+  "P0420":{m:"Katalysator-Wirkungsgrad unter Schwellwert (Bank 1)",s:"Abgas / Katalysator",c:["Katalysator gealtert","Lambdasonde nach Kat","Abgasleck","zuvor unbehobene Verbrennungsfehler"]},
+  "P0442":{m:"Tankentlüftung (EVAP) — kleines Leck",s:"Kraftstoffsystem / EVAP",c:["Tankdeckel undicht/locker","EVAP-Schläuche","Ventil der Tankentlüftung"]},
+  "P0455":{m:"Tankentlüftung (EVAP) — großes Leck",s:"Kraftstoffsystem / EVAP",c:["Tankdeckel fehlt/defekt","Schlauch abgerissen","EVAP-Ventil"]},
+  "P0500":{m:"Geschwindigkeitssensor — Fehlfunktion",s:"Fahrwerk / Getriebe",c:["Raddrehzahl-/Tachosensor","Kabel/Stecker","Steuergerät"]},
+  "P0562":{m:"Bordspannung zu niedrig",s:"Elektrik / Ladung",c:["Batterie schwach","Lichtmaschine/Regler","Masse-/Ladekabel"]},
+  "P0700":{m:"Getriebesteuerung — Sammelmeldung (TCM)",s:"Getriebe",c:["separaten Getriebecode auslesen","Getriebesteuergerät","Verkabelung"]},
+};
+function lookupDtc(){
+  let code=document.getElementById("dtc-code").value.trim().toUpperCase().replace(/\s/g,"");
+  const res=document.getElementById("dtc-result");
+  if(!/^[PBCU][0-3][0-9A-F]{3}$/.test(code)){
+    res.innerHTML=`<div class="dtc-note" style="color:var(--warn)">Bitte einen gültigen OBD-II-Code eingeben, z. B. P0130 (Buchstabe + 4 Zeichen).</div>`;return;
+  }
+  const v=DB.vehicles.find(x=>x.id===currentVid);
+  const generic = code[1]==="0"; // second char 0 = SAE-generic
+  const hit=DTC_DB[code];
+  const q=encodeURIComponent(code+" "+v.make+" "+v.model+" Ursache Reparatur");
+  const webBtn=`<a class="web-btn" href="https://www.google.com/search?q=${q}" target="_blank" rel="noopener">Im Web suchen: ${esc(code)} · ${esc(v.make)} ${esc(v.model)} ↗</a>`;
+  let inner;
+  if(hit){
+    inner=`<div class="code">${esc(code)}</div><span class="kind ${generic?'generic':'mfr'}">${generic?'genormt (SAE)':'herstellerspezifisch'}</span>
+      <div class="meaning">${esc(hit.m)}</div>
+      <div class="sys">System: ${esc(hit.s)}</div>
+      <div class="causes"><b>Häufige Ursachen</b>${hit.c.map(x=>'• '+esc(x)).join('<br>')}</div>${webBtn}
+      <div class="dtc-note">Ein Code weist auf ein System hin, nicht auf ein garantiert defektes Teil. Erst prüfen (Sichtprüfung, Messwerte), dann gezielt tauschen.</div>`;
+  } else if(generic){
+    inner=`<div class="code">${esc(code)}</div><span class="kind generic">genormt (SAE)</span>
+      <div class="meaning">Genormter Powertrain-Code</div>
+      <div class="sys">Dieser P0-Code ist standardisiert, aber (noch) nicht in der Kurzliste hinterlegt.</div>${webBtn}
+      <div class="dtc-note">Die genaue Bedeutung findest du über die Web-Suche — genormte P0-Codes bedeuten auf jedem Fahrzeug dasselbe.</div>`;
+  } else {
+    inner=`<div class="code">${esc(code)}</div><span class="kind mfr">herstellerspezifisch</span>
+      <div class="meaning">Herstellerspezifischer Code</div>
+      <div class="sys">Codes mit einer Ziffer ≠ 0 an zweiter Stelle sind je nach Marke unterschiedlich definiert — hier hilft nur eine fahrzeugspezifische Suche.</div>${webBtn}
+      <div class="dtc-note">Für ${esc(v.make)} kann derselbe Code etwas anderes bedeuten als bei anderen Marken.</div>`;
+  }
+  res.innerHTML=`<div class="dtc-card">${inner}</div>`;
+}
+
+/* ---- add vehicle ---- */
+/* ---- edit vehicle master data ---- */
+function editVehicleForm(){
+  const v=DB.vehicles.find(x=>x.id===currentVid);
+  const body=document.querySelector(".sheet-body");
+  // build an inline editing panel at the very top of the body
+  let panel=document.getElementById("veh-edit-panel");
+  if(panel){panel.remove();return;} // toggle off
+  panel=document.createElement("div");
+  panel.id="veh-edit-panel";
+  panel.innerHTML=`
+    <div class="addform" style="margin-bottom:16px;border-color:var(--amber)">
+      <div class="field"><label>Alias (merkbarer Name)</label>
+        <input id="ev-alias" value="${esc(v.alias)}"></div>
+      <div class="two">
+        <div class="field"><label>Hersteller</label><input id="ev-make" value="${esc(v.make)}"></div>
+        <div class="field"><label>Modell / Typ</label><input id="ev-model" value="${esc(v.model)}"></div>
+      </div>
+      <div class="two">
+        <div class="field"><label>Kennzeichen</label><input id="ev-kennz" value="${esc(v.kennz||'')}" placeholder="z. B. NE-AB 1234"></div>
+        <div class="field"><label>HU fällig (MM/JJ)</label><input id="ev-hu" value="${esc(v.hu||'')}" placeholder="z. B. 05/26"></div>
+      </div>
+      <div class="field"><label>VIN</label><input id="ev-vin" value="${esc(v.vin)}"></div>
+      <div class="two">
+        <div class="field"><label>Erstzulassung</label><input id="ev-ez" value="${esc(v.ez)}" placeholder="MM/JJJJ"></div>
+        <div class="field"><label>Kilometerstand</label><input id="ev-km" type="number" inputmode="numeric" value="${v.km}"></div>
+      </div>
+      <div class="two">
+        <div class="field"><label>HSN (2.1 im Schein)</label><input id="ev-hsn" value="${esc(v.hsn)}" maxlength="4"></div>
+        <div class="field"><label>TSN (2.2 im Schein)</label><input id="ev-tsn" value="${esc(v.tsn)}" maxlength="9"></div>
+      </div>
+      <div class="two">
+        <div class="field"><label>Hubraum</label><input id="ev-hubraum" value="${esc(v.hubraum||'')}" placeholder="z. B. 1598 cm³"></div>
+        <div class="field"><label>Leistung</label><input id="ev-leistung" value="${esc(v.leistung||'')}" placeholder="z. B. 135 kW"></div>
+      </div>
+      <div class="two">
+        <div class="field"><label>Kraftstoff</label><input id="ev-kraftstoff" value="${esc(v.kraftstoff||'')}" placeholder="z. B. Benzin"></div>
+        <div class="field"><label>Reifengröße</label><input id="ev-reifen" value="${esc(v.reifen||'')}" placeholder="z. B. 195/55 R16"></div>
+      </div>
+      <div class="tk-section">
+        <div class="tk-head">
+          <span>Typklassen (HP / TK / VK)</span>
+          <button class="tk-lookup" onclick="openAutoampel('${esc(v.hsn)}','${esc(v.tsn)}')">Bei Autoampel nachschlagen ↗</button>
+        </div>
+        <div class="three">
+          <div class="field"><label>HP</label><input id="ev-tkHP" value="${esc(v.tkHP||'')}" maxlength="2" placeholder="–"></div>
+          <div class="field"><label>TK</label><input id="ev-tkTK" value="${esc(v.tkTK||'')}" maxlength="2" placeholder="–"></div>
+          <div class="field"><label>VK</label><input id="ev-tkVK" value="${esc(v.tkVK||'')}" maxlength="2" placeholder="–"></div>
+        </div>
+      </div>
+      <div class="two">
+        <button class="btn wide" onclick="saveVehicleEdit()">Änderungen speichern</button>
+        <button class="btn ghost wide" onclick="document.getElementById('veh-edit-panel').remove()">Abbrechen</button>
+      </div>
+      <div class="hint" style="margin-top:2px">Die interne Fahrzeug-Kennung (${esc(v.id)}) bleibt beim Umbenennen erhalten — alle Einträge bleiben verknüpft.</div>
+      <button class="btn-delete" onclick="deleteVehicle('${esc(v.id)}')">🗑 Fahrzeug löschen (z. B. bei Verkauf)</button>
+    </div>`;
+  body.insertBefore(panel, body.firstChild);
+  panel.scrollIntoView({behavior:"smooth",block:"start"});
+}
+function saveVehicleEdit(){
+  const v=DB.vehicles.find(x=>x.id===currentVid);
+  const g=id=>document.getElementById(id).value.trim();
+  const alias=g("ev-alias");if(!alias){toast("Der Alias darf nicht leer sein","warn");return;}
+  v.alias=alias;
+  v.make=g("ev-make")||"—";
+  v.model=g("ev-model")||"—";
+  v.vin=g("ev-vin")||"—";
+  v.kennz=g("ev-kennz")||"";
+  v.hu=g("ev-hu")||"";
+  v.ez=g("ev-ez")||"—";
+  v.hsn=g("ev-hsn")||"—";
+  v.tsn=g("ev-tsn")||"—";
+  v.hubraum=g("ev-hubraum")||"";v.leistung=g("ev-leistung")||"";
+  v.kraftstoff=g("ev-kraftstoff")||"";v.reifen=g("ev-reifen")||"";
+  v.tkHP=g("ev-tkHP")||"";v.tkTK=g("ev-tkTK")||"";v.tkVK=g("ev-tkVK")||"";
+  const km=g("ev-km")?parseInt(g("ev-km").replace(/\D/g,""),10):v.km;
+  if(!isNaN(km)){if(km!==v.km)v.km_date=new Date().toISOString().slice(0,10);v.km=km;}
+  save();renderFleet();openDetail(currentVid);
+  toast("Fahrzeugdaten aktualisiert");
+}
+function deleteVehicle(id){
+  const v=DB.vehicles.find(x=>x.id===id);
+  if(!v)return;
+  // First choice: archive (keep, read-only) or go to permanent delete
+  const archive=confirm(`„${v.alias}" (${v.make} ${v.model}) archivieren?\n\n• OK = ins Archiv verschieben (bleibt ansehbar, z. B. für Käuferfragen)\n• Abbrechen = NICHT archivieren (nächster Schritt: endgültig löschen)`);
+  if(archive){
+    v.archived=true;
+    save();closeDetail();renderFleet();
+    toast(`„${v.alias}" ins Archiv verschoben`);
+    return;
+  }
+  // Not archiving -> offer permanent delete
+  const counts=[];
+  if(v.log&&v.log.length)counts.push(`${v.log.length} Bordbuch-Einträge`);
+  if(v.merkmale&&v.merkmale.length)counts.push(`${v.merkmale.length} Merkmale`);
+  const extra=counts.length?`\n\nDamit gehen auch verloren: ${counts.join(", ")}.`:"";
+  if(!confirm(`„${v.alias}" ENDGÜLTIG löschen?${extra}\n\nDies kann nicht rückgängig gemacht werden. Tipp: vorher „Daten sichern" nutzen.`))return;
+  DB.vehicles=DB.vehicles.filter(x=>x.id!==id);
+  save();closeDetail();renderFleet();
+  toast(`„${v.alias}" wurde gelöscht`);
+}
+function unarchiveVehicle(id){
+  const v=DB.vehicles.find(x=>x.id===id);if(!v)return;
+  v.archived=false;save();closeDetail();renderFleet();
+  toast(`„${v.alias}" ist wieder aktiv`);
+}
+
+/* ---- VIN decode (offline, from WMI = first 3 chars) ---- */
+/* World Manufacturer Identifier table. Focus on European makes.
+   3-char match first, then 2-char fallback (many WMIs are assigned by
+   the first 2 chars = manufacturer, 3rd = division/size). */
+const WMI={
+  // IVECO / Fiat group
+  "ZCF":{make:"IVECO",land:"Italien"},"ZCG":{make:"IVECO",land:"Italien"},
+  "ZFA":{make:"Fiat",land:"Italien"},"ZFC":{make:"Fiat",land:"Italien"},"ZFF":{make:"Ferrari",land:"Italien"},
+  "ZAR":{make:"Alfa Romeo",land:"Italien"},"ZLA":{make:"Lancia",land:"Italien"},
+  // Mercedes / VW group / German
+  "WDB":{make:"Mercedes-Benz",land:"Deutschland"},"WDC":{make:"Mercedes-Benz",land:"Deutschland"},
+  "WDD":{make:"Mercedes-Benz",land:"Deutschland"},"WDF":{make:"Mercedes-Benz (Transporter)",land:"Deutschland"},
+  "W1K":{make:"Mercedes-Benz",land:"Deutschland"},"W1V":{make:"Mercedes-Benz (Transporter)",land:"Deutschland"},
+  "WME":{make:"smart",land:"Deutschland"},"WME":{make:"smart",land:"Deutschland"},
+  "WVW":{make:"Volkswagen",land:"Deutschland"},"WV1":{make:"VW Nutzfahrzeuge",land:"Deutschland"},
+  "WV2":{make:"VW Bus/Transporter",land:"Deutschland"},"WVG":{make:"VW (SUV)",land:"Deutschland"},
+  "WAU":{make:"Audi",land:"Deutschland"},"WA1":{make:"Audi (SUV)",land:"Deutschland"},"TRU":{make:"Audi",land:"Ungarn"},
+  "WBA":{make:"BMW",land:"Deutschland"},"WBS":{make:"BMW M",land:"Deutschland"},"WBY":{make:"BMW i",land:"Deutschland"},
+  "WBW":{make:"BMW",land:"Deutschland"},"WP0":{make:"Porsche",land:"Deutschland"},"WP1":{make:"Porsche (SUV)",land:"Deutschland"},
+  "W0L":{make:"Opel",land:"Deutschland"},"W0V":{make:"Opel",land:"Deutschland"},"WOL":{make:"Opel",land:"Deutschland"},
+  // France
+  "VF1":{make:"Renault",land:"Frankreich"},"VF3":{make:"Peugeot",land:"Frankreich"},"VF7":{make:"Citroën",land:"Frankreich"},
+  "VF6":{make:"Renault Trucks",land:"Frankreich"},"VF8":{make:"Matra/DS",land:"Frankreich"},"VNK":{make:"Toyota",land:"Frankreich"},
+  // Spain / Czech / other EU
+  "VSS":{make:"SEAT",land:"Spanien"},"VSK":{make:"Nissan",land:"Spanien"},"VWV":{make:"VW",land:"Spanien"},
+  "TMB":{make:"Škoda",land:"Tschechien"},"TMP":{make:"Škoda",land:"Tschechien"},
+  // UK / Sweden
+  "SAL":{make:"Land Rover",land:"Großbritannien"},"SAJ":{make:"Jaguar",land:"Großbritannien"},"SCC":{make:"Lotus",land:"Großbritannien"},
+  "SCA":{make:"Rolls-Royce",land:"Großbritannien"},"SB1":{make:"Toyota",land:"Großbritannien"},"SFD":{make:"Alexander Dennis",land:"Großbritannien"},
+  "YV1":{make:"Volvo",land:"Schweden"},"YV2":{make:"Volvo Trucks",land:"Schweden"},"YS3":{make:"Saab",land:"Schweden"},
+  // Asia (common imports)
+  "JHM":{make:"Honda",land:"Japan"},"JTD":{make:"Toyota",land:"Japan"},"JT2":{make:"Toyota",land:"Japan"},
+  "JN1":{make:"Nissan",land:"Japan"},"JMB":{make:"Mitsubishi",land:"Japan"},"JF1":{make:"Subaru",land:"Japan"},
+  "KMH":{make:"Hyundai",land:"Südkorea"},"KNA":{make:"Kia",land:"Südkorea"},"KNM":{make:"Renault Samsung",land:"Südkorea"},
+  // USA
+  "1FT":{make:"Ford (Truck)",land:"USA"},"1FA":{make:"Ford",land:"USA"},"1G1":{make:"Chevrolet",land:"USA"},
+  "1HG":{make:"Honda",land:"USA"},"5YJ":{make:"Tesla",land:"USA"},"WF0":{make:"Ford",land:"Deutschland"},
+};
+// country by first char (fallback if WMI unknown)
+const VIN_COUNTRY={S:"Großbritannien",V:"Frankreich/Spanien",W:"Deutschland",X:"Russland/Osteuropa",Y:"Schweden/Finnland",Z:"Italien",
+  1:"USA",4:"USA",5:"USA",2:"Kanada",3:"Mexiko",6:"Australien",9:"Brasilien",J:"Japan",K:"Südkorea",L:"China",M:"Indien/Thailand",T:"Schweiz/Tschechien/Ungarn"};
+function decodeVin(vin){
+  const v=(vin||"").toUpperCase().replace(/[\s-]/g,"");
+  const res={valid:false,make:null,land:null,note:""};
+  if(v.length===0) return res;
+  if(v.length!==17){res.note="VIN sollte 17 Zeichen haben ("+v.length+" eingegeben)";}
+  // WMI: try 3-char, then 2-char
+  const w3=v.slice(0,3);
+  if(WMI[w3]){res.make=WMI[w3].make;res.land=WMI[w3].land;}
+  else{
+    const hit=Object.keys(WMI).find(k=>k.slice(0,2)===v.slice(0,2));
+    if(hit){res.make=WMI[hit].make;res.land=WMI[hit].land;res.note="Hersteller anhand der ersten 2 Zeichen geschätzt";}
+    else if(VIN_COUNTRY[v[0]]){res.land=VIN_COUNTRY[v[0]];res.note="Nur Herkunftsland erkannt (Hersteller nicht in der Liste)";}
+  }
+  res.valid = v.length===17;
+  return res;
+}
+
+/* ---- Typklassen bei Autoampel nachschlagen ---- */
+function openAutoampel(hsn,tsn){
+  const h=(hsn||"").trim(), t=(tsn||"").trim();
+  if(!h || h==="—" || !t || t==="—"){
+    toast("Bitte zuerst HSN und TSN eintragen","warn");return;
+  }
+  const query=h+" "+t;
+  // copy the HSN/TSN so it can be pasted into Autoampel's quick search
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(query).catch(()=>{});
+  }
+  window.open("https://www.autoampel.de/","_blank","noopener");
+  toast(`„${query}" kopiert — bei Autoampel oben einfügen & suchen`);
+}
+
+/* ---- add vehicle (form with live VIN decode) ---- */
+function addVehicle(){
+  currentVid=null;
+  document.getElementById("sheet").innerHTML=`
+    <div class="sheet-head">
+      <div class="htitle"><div class="alias-lg">Neues Fahrzeug</div>
+        <div class="sub">Alias vergeben, optional VIN — Hersteller wird erkannt</div></div>
+      <button class="x" onclick="closeDetail()">✕</button>
+    </div>
+    <div class="sheet-body">
+      <div class="scan-box">
+        <label class="scan-btn" for="nv-photo">📷 Fahrzeugschein: Foto, PDF, Mediathek oder Datei</label>
+        <input type="file" id="nv-photo" accept="image/*,application/pdf,.pdf" style="display:none" onchange="scanSchein(event)">
+        <div id="scan-status"></div>
+        <div id="scan-results"></div>
+      </div>
+      <div class="addform" style="border-color:var(--amber)">
+        <div class="field"><label>Alias (merkbarer Name) *</label>
+          <input id="nv-alias" placeholder="z. B. Der Rote" autocomplete="off"></div>
+        <div class="field"><label>VIN (optional)</label>
+          <input id="nv-vin" placeholder="17-stellige Fahrgestellnummer" autocomplete="off"
+                 maxlength="17" oninput="this.value=this.value.toUpperCase();decodeVinLive()"></div>
+        <div id="nv-decode" class="vin-decode"></div>
+        <button class="equip-btn" type="button" onclick="lookupEquipment()">🔧 Ausstattung online nachschlagen (BMW/MINI)</button>
+        <div class="two">
+          <div class="field"><label>Hersteller</label><input id="nv-make" placeholder="wird erkannt …"></div>
+          <div class="field"><label>Modell / Typ</label><input id="nv-model" placeholder="optional"></div>
+        </div>
+        <div class="two">
+          <div class="field"><label>Erstzulassung</label><input id="nv-ez" placeholder="MM/JJJJ"></div>
+          <div class="field"><label>HU fällig</label><input id="nv-hu" placeholder="MM/JJ"></div>
+        </div>
+        <div class="field"><label>Kennzeichen</label><input id="nv-kennz" placeholder="optional"></div>
+        <div class="two">
+          <div class="field"><label>HSN (2.1)</label><input id="nv-hsn" maxlength="4" placeholder="optional"></div>
+          <div class="field"><label>TSN (2.2)</label><input id="nv-tsn" maxlength="9" placeholder="optional"></div>
+        </div>
+        <div class="two">
+          <div class="field"><label>Hubraum</label><input id="nv-hubraum" placeholder="z. B. 1598 cm³"></div>
+          <div class="field"><label>Leistung</label><input id="nv-leistung" placeholder="z. B. 135 kW"></div>
+        </div>
+        <div class="two">
+          <div class="field"><label>Kraftstoff</label><input id="nv-kraftstoff" placeholder="z. B. Benzin"></div>
+          <div class="field"><label>Reifengröße</label><input id="nv-reifen" placeholder="z. B. 195/55 R16 87V"></div>
+        </div>
+        <button class="btn wide" onclick="saveNewVehicle()">Fahrzeug anlegen</button>
+      </div>
+      <div class="hint">Der Fahrzeugschein wird nur lokal auf deinem Gerät ausgelesen — das Foto wird nicht hochgeladen. Erkannte Werte musst du einzeln bestätigen, bevor sie übernommen werden. VIN-Erkennung des Herstellers funktioniert auch ohne Foto.</div>
+    </div>`;
+  document.getElementById("scrim").classList.add("open");document.body.style.overflow="hidden";
+  setTimeout(()=>document.getElementById("nv-alias").focus(),100);
+}
+/* ---- Fahrzeugschein per OCR auslesen (lokal, Tesseract.js) ---- */
+/* ---- image preprocessing to help OCR on the green Fahrzeugschein ---- */
+function preprocessForOcr(source){
+  return new Promise((resolve)=>{
+    const draw=(imgW,imgH,drawFn)=>{
+      // upscale so the smallest text is comfortably large; cap to keep memory sane
+      const targetW=Math.min(2200, Math.max(imgW, 1600));
+      const scale=targetW/imgW;
+      const w=Math.round(imgW*scale), h=Math.round(imgH*scale);
+      const c=document.createElement("canvas");c.width=w;c.height=h;
+      const ctx=c.getContext("2d");
+      ctx.fillStyle="#fff";ctx.fillRect(0,0,w,h);
+      drawFn(ctx,w,h);
+      const img=ctx.getImageData(0,0,w,h);const d=img.data;
+      // 1) knock out the green security tint + go grayscale.
+      //    Weight red & blue up, green down, so the green guilloché fades.
+      const gray=new Float32Array(w*h);
+      for(let i=0,p=0;i<d.length;i+=4,p++){
+        const r=d[i],g=d[i+1],b=d[i+2];
+        // luminance that de-emphasises green
+        let v=0.5*r+0.15*g+0.35*b;
+        gray[p]=v;
+      }
+      // 2) local contrast: compute a coarse average, threshold each pixel
+      //    against its neighbourhood (adaptive) to beat uneven lighting.
+      const radius=Math.max(8,Math.round(w/120));
+      // build integral image for fast box average
+      const ii=new Float64Array((w+1)*(h+1));
+      for(let y=0;y<h;y++){let rowsum=0;for(let x=0;x<w;x++){rowsum+=gray[y*w+x];ii[(y+1)*(w+1)+(x+1)]=ii[y*(w+1)+(x+1)]+rowsum;}}
+      const boxAvg=(x,y)=>{
+        const x0=Math.max(0,x-radius),y0=Math.max(0,y-radius),x1=Math.min(w-1,x+radius),y1=Math.min(h-1,y+radius);
+        const area=(x1-x0+1)*(y1-y0+1);
+        const s=ii[(y1+1)*(w+1)+(x1+1)]-ii[(y0)*(w+1)+(x1+1)]-ii[(y1+1)*(w+1)+(x0)]+ii[(y0)*(w+1)+(x0)];
+        return s/area;
+      };
+      for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+        const p=y*w+x;const avg=boxAvg(x,y);
+        // pixel darker than local average by a margin -> ink (black), else white
+        const val = gray[p] < avg-8 ? 0 : 255;
+        const o=p*4;d[o]=d[o+1]=d[o+2]=val;d[o+3]=255;
+      }
+      ctx.putImageData(img,0,0);
+      resolve(c);
+    };
+    if(source instanceof HTMLCanvasElement){
+      draw(source.width,source.height,(ctx)=>ctx.drawImage(source,0,0,ctx.canvas.width,ctx.canvas.height));
+    }else{
+      const url=URL.createObjectURL(source);
+      const im=new Image();
+      im.onload=()=>{draw(im.naturalWidth,im.naturalHeight,(ctx)=>ctx.drawImage(im,0,0,ctx.canvas.width,ctx.canvas.height));URL.revokeObjectURL(url);};
+      im.onerror=()=>{URL.revokeObjectURL(url);resolve(source);};
+      im.src=url;
+    }
+  });
+}
+
+async function scanSchein(ev){
+  const file=ev.target.files&&ev.target.files[0];
+  if(!file)return;
+  const status=document.getElementById("scan-status");
+  const results=document.getElementById("scan-results");
+  results.innerHTML="";
+  if(typeof Tesseract==="undefined"){
+    status.innerHTML=`<div class="scan-msg warn">Texterkennung nicht geladen — bitte Internetverbindung prüfen und Seite neu laden.</div>`;
+    return;
+  }
+  status.innerHTML=`<div class="scan-msg">Lese Fahrzeugschein … <span id="ocr-pct">0%</span><br><span class="nt">Läuft lokal auf deinem Gerät, kann einen Moment dauern.</span></div>`;
+  try{
+    // If PDF: render first page to a canvas, then OCR that image.
+    let ocrInput=file;
+    const isPdf = file.type==="application/pdf" || /\.pdf$/i.test(file.name);
+    if(isPdf){
+      if(!window.pdfjsLib){status.innerHTML=`<div class="scan-msg warn">PDF-Unterstützung noch nicht geladen — bitte Seite neu laden und erneut versuchen.</div>`;return;}
+      const buf=await file.arrayBuffer();
+      const pdf=await window.pdfjsLib.getDocument({data:buf}).promise;
+      const page=await pdf.getPage(1);
+      const vp=page.getViewport({scale:2.5}); // high res for OCR
+      const canvas=document.createElement("canvas");
+      canvas.width=vp.width;canvas.height=vp.height;
+      await page.render({canvasContext:canvas.getContext("2d"),viewport:vp}).promise;
+      ocrInput=canvas;
+    }
+    // Preprocess the image: upscale, drop the green security tint, boost
+    // contrast to near black-on-white — what OCR reads best on a Fahrzeugschein.
+    status.innerHTML=`<div class="scan-msg">Bild wird aufbereitet …<br><span class="nt">Grünstich entfernen, Kontrast anheben.</span></div>`;
+    ocrInput=await preprocessForOcr(ocrInput);
+    const {data}=await Tesseract.recognize(ocrInput,"deu",{
+      logger:m=>{if(m.status==="recognizing text"){const p=Math.round(m.progress*100);const el=document.getElementById("ocr-pct");if(el)el.textContent="Lese Text … "+p+"%";}}
+    });
+    const rawText=data.text||"";
+    window._lastOcrText=rawText;
+    const found=extractScheinFields(rawText);
+    const diagBtn=`<button class="diag-btn" onclick="showRawText()">🔍 erkannten Text anzeigen</button>`;
+    if(!Object.keys(found).length){
+      status.innerHTML=`<div class="scan-msg warn">Keine eindeutigen Felder erkannt. Tipp: gerader, gut ausgeleuchteter Ausschnitt oder ein PDF hilft. Du kannst die Werte auch von Hand eintragen.</div>${diagBtn}`;
+      return;
+    }
+    status.innerHTML=`<div class="scan-msg ok">Erkannt — bitte jeden Wert prüfen/korrigieren und mit ✓ übernehmen:</div>${diagBtn}`;
+    renderScanResults(found);
+  }catch(e){
+    status.innerHTML=`<div class="scan-msg warn">Konnte die Datei nicht auslesen. Versuch es mit einem schärferen Foto/PDF oder trag die Werte manuell ein.</div>`;
+  }
+  ev.target.value="";
+}
+function showRawText(){
+  const t=window._lastOcrText||"(kein Text)";
+  const results=document.getElementById("scan-results");
+  let box=document.getElementById("raw-text-box");
+  if(box){box.remove();return;}
+  box=document.createElement("div");
+  box.id="raw-text-box";
+  box.className="raw-text";
+  box.innerHTML=`<div class="raw-head">Von der Texterkennung gelesener Rohtext:</div><pre>${esc(t)}</pre>`;
+  results.prepend(box);
+}
+
+function extractScheinFields(raw){
+  const text=raw.replace(/[|]/g," ");
+  const up=text.toUpperCase();
+  const found={};
+
+  // ---- VIN: 17 chars, no I/O/Q ----
+  const vinMatch=up.replace(/[^A-Z0-9\s]/g," ").split(/\s+/).find(t=>/^[A-HJ-NPR-Z0-9]{17}$/.test(t));
+  if(vinMatch)found.vin={label:"VIN (Fahrgestellnr.)",value:vinMatch,target:"nv-vin"};
+
+  // ---- HSN + TSN ----
+  // On the Schein these sit together on the B-line: "... 2.1 7100 2.2 ACF000068".
+  // Try the combined pattern first (most reliable), then individual fallbacks.
+  let hsnVal=null,tsnVal=null;
+  const combo=up.match(/2[.,]?1[\s:]*([0-9OIL]{4})[\s\S]{0,12}?2[.,]?2[\s:]*([A-Z0-9]{3,9})/);
+  if(combo){hsnVal=fixDigits(combo[1]);tsnVal=combo[2];}
+  if(!hsnVal){const h=up.match(/\b2[.,]?1\b[^\dOIL]{0,6}([0-9OIL]{4})/)||up.match(/\bHSN\b[^\d]{0,6}(\d{4})/);if(h)hsnVal=fixDigits(h[1]);}
+  if(!tsnVal){const t=up.match(/\b2[.,]?2\b[^A-Z0-9]{0,6}([A-Z0-9]{3,9})/)||up.match(/\bTSN\b[^A-Z0-9]{0,6}([A-Z0-9]{3,9})/);if(t)tsnVal=t[1];}
+  if(hsnVal)found.hsn={label:"HSN (zu 2.1)",value:hsnVal,target:"nv-hsn"};
+  if(tsnVal)found.tsn={label:"TSN (zu 2.2)",value:tsnVal,target:"nv-tsn"};
+
+  // ---- Erstzulassung: field B, earliest date DD.MM.YY(YY) ----
+  const ez=up.match(/(\d{2})[.,\/](\d{2})[.,\/](\d{2,4})/);
+  if(ez){let yr=ez[3];if(yr.length===2)yr=(parseInt(yr,10)>50?"19":"20")+yr;found.ez={label:"Erstzulassung",value:`${ez[2]}/${yr}`,target:"nv-ez"};}
+
+  // ---- Nächste HU: field X "08.22" or "08.2022" ----
+  const hu=up.match(/N[ÄA]E?CHSTE\s*HU[\s\S]{0,30}?(\d{2})[.,\/](\d{2,4})/)||up.match(/\bHU\b[\s\S]{0,15}?(\d{2})[.,\/](\d{2,4})/);
+  if(hu){let yr=hu[2];if(yr.length===4)yr=yr.slice(2);found.hu={label:"HU fällig (Feld X)",value:`${hu[1]}/${yr}`,target:"nv-hu"};}
+
+  // ---- Hersteller: field D.1 ----
+  const MAKES=["MINI","IVECO","MERCEDES-BENZ","MERCEDES","AUDI","VOLKSWAGEN","BMW","OPEL","FORD","RENAULT","PEUGEOT","CITROEN","FIAT","SEAT","SKODA","TOYOTA","VOLVO","PORSCHE","SMART","NISSAN","HYUNDAI","KIA","MAZDA","HONDA","YAMAHA","KAWASAKI","SUZUKI","KTM","DUCATI","PIAGGIO","VESPA","HARLEY-DAVIDSON","TRIUMPH"];
+  const KEEP_UPPER=new Set(["MINI","IVECO","BMW","VW","SEAT","KIA","KTM"]);
+  const d1=up.match(/D[.,]?1[^A-ZÄÖÜ]{0,4}([A-ZÄÖÜ][A-ZÄÖÜ0-9\- ]{1,20})/);
+  let makeHit=null;
+  if(d1){const cand=MAKES.find(m=>d1[1].includes(m));if(cand)makeHit=cand;}
+  if(!makeHit)makeHit=MAKES.find(m=>up.includes(m));
+  if(makeHit){const disp=KEEP_UPPER.has(makeHit)?makeHit:makeHit.split("-").map(w=>w.charAt(0)+w.slice(1).toLowerCase()).join("-");
+    found.make={label:"Hersteller",value:disp,target:"nv-make"};}
+
+  // ---- Modell: field D.3 (Handelsbezeichnung) e.g. NC700SA ----
+  const d3=up.match(/D[.,]?3[^A-Z0-9]{0,4}([A-Z0-9][A-Z0-9\-]{1,16})/);
+  if(d3){let m=d3[1].trim().replace(/\s+\d[.,]?\d?$/,"").trim();if(m&&!/^MINI$|^HONDA$/.test(m))found.model={label:"Modell (D.3)",value:m,target:"nv-model"};}
+
+  // ---- Hubraum: field P.1 — cm³ ----
+  const hub=up.match(/P[.,]?1[^\d]{0,6}(\d{2,4})/)||up.match(/(\d{3,4})\s*CM/);
+  if(hub)found.hubraum={label:"Hubraum (P.1)",value:hub[1]+" cm³",target:"nv-hubraum"};
+
+  // ---- Leistung: field P.2 — kW. Appears as "35 /6250" (kW / rpm) or "P.2 35". ----
+  let kwVal=null;
+  const p2=up.match(/P[.,]?2[.,\s]*(\d{1,3})\s*[\/]/); // "P.2 35 /6250"
+  if(p2)kwVal=p2[1];
+  if(!kwVal){const p2b=up.match(/P[.,]?2[.,\s]*(\d{1,3})\b/);if(p2b)kwVal=p2b[1];}
+  if(!kwVal){const kwr=up.match(/(\d{1,3})\s*\/\s*\d{4}/);if(kwr)kwVal=kwr[1];} // "35 /6250"
+  if(kwVal)found.leistung={label:"Leistung (P.2)",value:kwVal+" kW",target:"nv-leistung"};
+
+  // ---- Kraftstoff: field P.3 ----
+  const fuel=up.match(/P[.,]?3[^A-Z]{0,6}(BENZIN|DIESEL|ELEKTRO|HYBRID|LPG|CNG|WASSERSTOFF|ERDGAS|AUTOGAS)/)
+           || up.match(/\b(BENZIN|DIESEL|ELEKTRO|WASSERSTOFF)\b/);
+  if(fuel){const f=fuel[1];found.kraftstoff={label:"Kraftstoff (P.3)",value:f.charAt(0)+f.slice(1).toLowerCase(),target:"nv-kraftstoff"};}
+
+  // ---- Reifengröße: field 15.1 — car "195/55 R16 87V" OR bike "120/70ZR17M/C 58W" ----
+  const tire=up.match(/(\d{3}\/\d{2}\s*Z?R\s*\d{2}\s*M\/C\s*\d{2,3}\s*[A-Z])/)   // bike
+          || up.match(/(\d{3}\/\d{2}\s*[RZ]{1,2}\s*\d{2}\s*\d{2,3}\s*[A-Z])/)     // car
+          || up.match(/(\d{3}\/\d{2}\s*Z?R\s*\d{2})/);
+  if(tire)found.reifen={label:"Reifengröße (15.1)",value:tire[1].replace(/\s+/g," ").trim(),target:"nv-reifen"};
+
+  return found;
+}
+// OCR often reads O→0, I/L→1 in numeric fields
+function fixDigits(s){return s.replace(/O/g,"0").replace(/[IL]/g,"1");}
+
+function renderScanResults(found){
+  const box=document.getElementById("scan-results");
+  box.innerHTML=Object.entries(found).map(([k,f])=>`
+    <div class="scan-chip" id="chip-${k}">
+      <div class="chip-info"><span class="chip-label">${esc(f.label)}</span>
+        <input class="chip-edit" id="edit-${k}" value="${esc(f.value)}" autocomplete="off"></div>
+      <button class="chip-ok" onclick="acceptScan('${k}','${esc(f.target)}',this)" title="Übernehmen">✓</button>
+    </div>`).join("");
+  window._scanFound=found;
+}
+function acceptScan(key,target,btn){
+  const editEl=document.getElementById("edit-"+key);
+  const val=editEl?editEl.value.trim():((window._scanFound||{})[key]||{}).value;
+  const el=document.getElementById(target);
+  if(el){el.value=val; if(target==="nv-vin")decodeVinLive();}
+  const chip=document.getElementById("chip-"+key);
+  if(chip){chip.classList.add("accepted");btn.textContent="✓";btn.disabled=true;}
+}
+
+function decodeVinLive(){
+  const vin=document.getElementById("nv-vin").value.replace(/[\s-]/g,"");
+  const box=document.getElementById("nv-decode");
+  const r=decodeVin(vin);
+  if(!vin){box.innerHTML="";return;}
+  let html="";
+  if(r.make){
+    document.getElementById("nv-make").value=r.make;
+    box.className="vin-decode ok";
+    html=`✓ erkannt: <b>${esc(r.make)}</b>${r.land?` · ${esc(r.land)}`:''}${r.note?`<span class="nt">${esc(r.note)}</span>`:''}`;
+  } else if(r.land){
+    box.className="vin-decode warn";
+    html=`Land: <b>${esc(r.land)}</b><span class="nt">${esc(r.note||'Hersteller nicht erkannt')}</span>`;
+  } else {
+    box.className="vin-decode warn";
+    html=`<span class="nt">${esc(r.note||'VIN noch unvollständig')}</span>`;
+  }
+  // offer online lookup once VIN is 17 chars
+  if(vin.length===17){
+    html+=`<button class="vin-online-btn" onclick="lookupNhtsa()">🌐 Modell &amp; Motor online nachschlagen</button>`;
+  }
+  box.innerHTML=html;
+  // auto-trigger online lookup once, when VIN just reached 17 chars
+  if(vin.length===17 && window._lastVinLooked!==vin){
+    window._lastVinLooked=vin;
+    lookupNhtsa(true);
+  }
+}
+async function lookupNhtsa(auto){
+  const vin=document.getElementById("nv-vin").value.replace(/[\s-]/g,"");
+  if(vin.length!==17){toast("VIN muss 17 Zeichen haben","warn");return;}
+  const box=document.getElementById("nv-decode");
+  const status=document.createElement("div");
+  status.className="nt";status.id="nhtsa-status";status.textContent="🌐 frage Fahrzeugdatenbank ab …";
+  box.appendChild(status);
+  try{
+    const res=await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${vin}?format=json`);
+    const json=await res.json();
+    const d=(json.Results&&json.Results[0])||{};
+    // Build suggestions from the fields NHTSA returns
+    const sugg={};
+    if(d.Make && !document.getElementById("nv-make").value) sugg.make={label:"Hersteller",value:titleCase(d.Make),target:"nv-make"};
+    const modelParts=[d.Model,d.Series,d.Trim].filter(Boolean).join(" ").trim();
+    if(modelParts) sugg.model={label:"Modell / Typ",value:modelParts,target:"nv-model"};
+    if(d.ModelYear) sugg.ez={label:"Baujahr",value:d.ModelYear,target:"nv-ez"};
+    const cc=d.DisplacementCC?Math.round(parseFloat(d.DisplacementCC)):null;
+    if(cc) sugg.hubraum={label:"Hubraum",value:cc+" cm³",target:"nv-hubraum"};
+    if(d.EngineHP){const kw=Math.round(parseFloat(d.EngineHP)*0.7457);if(kw)sugg.leistung={label:"Leistung",value:kw+" kW",target:"nv-leistung"};}
+    if(d.FuelTypePrimary){const f=d.FuelTypePrimary.split(/[,(]/)[0].trim();if(f&&f!=="Not Applicable")sugg.kraftstoff={label:"Kraftstoff",value:mapFuel(f),target:"nv-kraftstoff"};}
+    const s=document.getElementById("nhtsa-status");if(s)s.remove();
+    const keys=Object.keys(sugg);
+    if(!keys.length){
+      if(!auto)toast("Online keine zusätzlichen Daten gefunden","warn");
+      return;
+    }
+    // reuse the scan-results confirmation UI
+    const results=document.getElementById("scan-results");
+    document.getElementById("scan-status").innerHTML=`<div class="scan-msg ok">🌐 Online gefunden — bitte prüfen/korrigieren und mit ✓ übernehmen:</div>`;
+    renderScanResults(sugg);
+    results.scrollIntoView({behavior:"smooth",block:"nearest"});
+  }catch(e){
+    const s=document.getElementById("nhtsa-status");if(s){s.textContent="🌐 Online-Abfrage nicht möglich (offline?). Daten bitte manuell eintragen.";}
+    if(!auto)toast("Online-Abfrage fehlgeschlagen","warn");
+  }
+}
+function titleCase(s){return String(s).toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());}
+function mapFuel(f){const l=f.toLowerCase();if(l.includes("gasolin")||l.includes("petrol"))return"Benzin";if(l.includes("diesel"))return"Diesel";if(l.includes("electric"))return"Elektro";if(l.includes("hybrid"))return"Hybrid";return f;}
+
+/* ---- Ausstattung online nachschlagen (BMW/MINI/RR via mdecoder) ---- */
+function lookupEquipment(){
+  const vin=document.getElementById("nv-vin").value.replace(/[\s-]/g,"");
+  const make=(document.getElementById("nv-make").value||"").toLowerCase();
+  const isBmwGroup = /bmw|mini|rolls/.test(make) || /^(WBA|WBS|WBY|WBW|WMW|WME|SCA|4US|5UX)/i.test(vin);
+  if(vin.length!==17){toast("Bitte zuerst die vollständige VIN eingeben","warn");return;}
+  if(!isBmwGroup){
+    toast("Ausstattungs-Decoder gibt es v.a. für BMW/MINI/Rolls-Royce","warn");
+  }
+  const last7=vin.slice(-7);
+  // mdecoder decodes BMW-group VINs by the last 7 chars
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(last7).catch(()=>{});}
+  window.open("https://www.mdecoder.com/decode/"+encodeURIComponent(last7),"_blank","noopener");
+  toast(`mdecoder geöffnet (VIN-Endung ${last7} kopiert) — CAPTCHA lösen, Ausstattung ablesen`);
+}
+function saveNewVehicle(){
+  const g=id=>document.getElementById(id).value.trim();
+  const alias=g("nv-alias");if(!alias){toast("Bitte einen Alias vergeben","warn");return;}
+  const vin=g("nv-vin").replace(/[\s-]/g,"");
+  const id="VEH_"+String(DB.vehicles.length+1).padStart(3,"0");
+  DB.vehicles.push({id,alias,make:g("nv-make")||"—",model:g("nv-model")||"—",vin:vin||"—",
+    ez:g("nv-ez")||"—",hsn:g("nv-hsn")||"—",tsn:g("nv-tsn")||"—",kennz:g("nv-kennz")||"",hu:g("nv-hu")||"",
+    hubraum:g("nv-hubraum")||"",leistung:g("nv-leistung")||"",kraftstoff:g("nv-kraftstoff")||"",reifen:g("nv-reifen")||"",
+    tkHP:"",tkTK:"",tkVK:"",km:0,km_date:null,notify:false,merkmale:[],wartung:defaultWartung(),log:[]});
+  save();closeDetail();renderFleet();toast("Fahrzeug „"+alias+"“ angelegt");
+}
+
+
+
+/* ---- util ---- */
+/* ---- print / PDF of a vehicle detail ---- */
+function printVehicle(){
+  const v=DB.vehicles.find(x=>x.id===currentVid);
+  if(!v)return;
+  const dtFull=d=>d?new Date(d).toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit",year:"numeric"}):"—";
+  const euro=n=>Number(n||0).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
+  const wrows=v.wartung.map(w=>{
+    const iv=[];if(w.iv_km)iv.push(`alle ${num(w.iv_km)} km`);if(w.iv_months)iv.push(`alle ${w.iv_months} Mon.`);
+    const last=[];if(w.last_km!=null)last.push(`${num(w.last_km)} km`);if(w.last_date)last.push(dtFull(w.last_date));
+    return `<tr><td>${esc(w.name)}</td><td>${iv.join(" oder ")||"—"}</td><td>${last.join(" · ")||"noch nicht erfasst"}</td></tr>`;
+  }).join("");
+  const lrows=[...v.log].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(e=>
+    `<tr><td>${dtFull(e.date)}</td><td>${e.km?num(e.km)+" km":"—"}</td><td>${esc(e.text)}${e.parts?`<br><span class="sub">${esc(e.parts)}</span>`:""}</td><td>${e.cost?euro(e.cost):""}</td></tr>`
+  ).join("");
+  const mrows=v.merkmale.map(m=>
+    `<tr><td>${esc(m.bauteil)}</td><td>${esc(m.wert)}</td><td>${m.bestaetigt?"bestätigt":"offen"}</td><td>${esc(m.methode||"")}</td></tr>`
+  ).join("");
+  const html=`
+    <div class="print-doc">
+      <div class="p-head">
+        <div><h1>${esc(v.alias)}</h1>
+          <div class="p-sub">${esc(v.make)} ${esc(v.model)}${v.kennz?" · "+esc(v.kennz):""}</div></div>
+        <div class="p-brand">KFZ·Manager<br><span>Fahrzeugdatenblatt</span></div>
+      </div>
+      <table class="p-kv">
+        <tr><th>VIN</th><td>${esc(v.vin)}</td><th>Erstzulassung</th><td>${esc(v.ez)}</td></tr>
+        <tr><th>Kennzeichen</th><td>${esc(v.kennz||"—")}</td><th>HU fällig</th><td>${esc(v.hu||"—")}</td></tr>
+        <tr><th>HSN / TSN</th><td>${esc(v.hsn)} / ${esc(v.tsn)}</td><th>Kilometerstand</th><td>${num(v.km)} km${v.km_date?" ("+dtFull(v.km_date)+")":""}</td></tr>
+        <tr><th>Motor</th><td>${esc([v.hubraum,v.leistung,v.kraftstoff].filter(Boolean).join(" · ")||"—")}</td><th>Reifengröße</th><td>${esc(v.reifen||"—")}</td></tr>
+        <tr><th>Typklassen</th><td>${esc([v.tkHP&&"HP "+v.tkHP,v.tkTK&&"TK "+v.tkTK,v.tkVK&&"VK "+v.tkVK].filter(Boolean).join(" / ")||"—")}</td><th>Kennzeichen</th><td>${esc(v.kennz||"—")}</td></tr>
+      </table>
+      <h2>Wartungsintervalle</h2>
+      <table class="p-tbl"><thead><tr><th>Position</th><th>Intervall</th><th>Zuletzt</th></tr></thead><tbody>${wrows||'<tr><td colspan="3">—</td></tr>'}</tbody></table>
+      <h2>Bordbuch</h2>
+      <table class="p-tbl"><thead><tr><th>Datum</th><th>km</th><th>Arbeit / Teile</th><th>Kosten</th></tr></thead><tbody>${lrows||'<tr><td colspan="4">Keine Einträge</td></tr>'}</tbody></table>
+      <h2>Ausstattung &amp; Merkmale</h2>
+      <table class="p-tbl"><thead><tr><th>Bauteil</th><th>Wert / Typ</th><th>Status</th><th>Festgestellt</th></tr></thead><tbody>${mrows||'<tr><td colspan="4">Keine Merkmale</td></tr>'}</tbody></table>
+      <div class="p-foot">Erstellt am ${dtFull(new Date())} · KFZ·Manager</div>
+    </div>`;
+  let holder=document.getElementById("print-holder");
+  if(!holder){holder=document.createElement("div");holder.id="print-holder";document.body.appendChild(holder);}
+  holder.innerHTML=html;
+  window.print();
+}
+
+/* ---- data backup: export / import ---- */
+function exportData(){
+  try{
+    const payload={app:"KFZ-Manager",version:1,exported:new Date().toISOString(),data:DB};
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    const stamp=new Date().toISOString().slice(0,10);
+    a.href=url;a.download=`KFZ-Manager-Sicherung-${stamp}.json`;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    toast("Sicherung erstellt — jetzt in iCloud/Dateien ablegen");
+  }catch(e){toast("Export fehlgeschlagen","warn");}
+}
+function importData(ev){
+  const file=ev.target.files&&ev.target.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const parsed=JSON.parse(e.target.result);
+      const incoming = parsed && parsed.data && Array.isArray(parsed.data.vehicles) ? parsed.data
+                     : (parsed && Array.isArray(parsed.vehicles) ? parsed : null);
+      if(!incoming){toast("Datei nicht erkannt","warn");return;}
+      const n=incoming.vehicles.length;
+      const cur=DB.vehicles.length;
+      const msg = cur>0
+        ? `Sicherung mit ${n} Fahrzeug(en) laden?\n\nAchtung: ersetzt die aktuell ${cur} gespeicherten Fahrzeuge.`
+        : `Sicherung mit ${n} Fahrzeug(en) laden?`;
+      if(!confirm(msg)){ev.target.value="";return;}
+      DB=migrate(incoming);save();renderFleet();
+      toast(`${n} Fahrzeug(e) geladen`);
+    }catch(err){toast("Datei konnte nicht gelesen werden","warn");}
+    ev.target.value="";
+  };
+  reader.readAsText(file);
+}
+
+/* ---- util ---- */
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function fmtDate(d){if(!d)return"";const x=new Date(d);return x.toLocaleDateString("de-DE",{month:"2-digit",year:"numeric"});}
+function fmtDateShort(d){if(!d)return"—";const x=new Date(d);return x.toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit",year:"2-digit"});}
+let toastTimer;function toast(msg,kind){const t=document.getElementById("toast");document.getElementById("toast-msg").textContent=msg;
+  const k=t.querySelector(".tk");k.textContent=kind==="warn"?"!":"✓";k.style.color=kind==="warn"?"var(--warn)":"var(--ok)";
+  t.classList.add("show");clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove("show"),2400);}
+
+document.getElementById("scrim").addEventListener("click",e=>{if(e.target.id==="scrim")closeDetail();});
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDetail();});
+renderFleet();
+</script>
+</body>
+</html>
